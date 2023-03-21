@@ -6,13 +6,22 @@
   "author": "Fernando Pelliccioni <fpelliccioni@gmail.com>",
   "license": "MIT",
   "scripts": {
-    "dev": "nodemon src/index.js"
+    "devold": "nodemon src/index.js",
+    "start": "node ./dist/src/index.js",
+    "dev": "node ./dist/src/routes/github.js",
+    "build-dist": "./node_modules/typescript/bin/tsc"
   },
   "dependencies": {
+    "@octokit/rest": "16.25.0",
+    "@octokit/types": "^9.0.0",
+    "@types/fs-extra": "^11.0.1",
     "express": "^4.18.2",
-    "morgan": "^1.10.0"
+    "globby": "^13.1.3",
+    "morgan": "^1.10.0",
+    "typescript": "^5.0.2"
   },
   "devDependencies": {
+    "@types/node": "^18.15.5",
     "nodemon": "^2.0.21"
   }
 }
