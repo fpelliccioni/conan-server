@@ -1,73 +1,74 @@
-const dotenv = require('dotenv');
+import dotenv from 'dotenv';
 dotenv.config();
+// import express from 'express';
+// import morgan from 'morgan';
+import fs from 'fs';
+import Octokit from '@octokit/rest';
+import path from 'path';
+// import {encode, decode, labels} from 'windows-1252';
+// import getRawBody from 'raw-body';
+// import typeis from 'type-is';
+// import { readFile } from 'fs-extra';
 
-const Octokit = require('@octokit/rest')
-const path = require('path')
-const { readFile } = require('fs-extra');
-const { http, https } = require('follow-redirects');
-const fs = require('fs');
-// import {globby} from 'globby';
-const globby = (...args) => import('globby').then(({default: globby}) => globby(...args));
+import pkg from 'fs-extra';
+const { readFile } = pkg;
 
-const uploadToRepo = async (
-  personalAccessToken,
-  coursePath,
-  org,
-  repo,
-  branch
-) => {
+import {globby} from 'globby';
+// import { http, https } from 'follow-redirects';
+import pkg2 from 'follow-redirects';
+const { http, https } = pkg2;
+
+export const uploadToRepo = async (personalAccessToken, coursePath, org, repo, branch, commitMessage) => {
   const octo = new Octokit({
     auth: personalAccessToken,
   })
 
-  await uploadToRepoInternal(octo, coursePath, org, repo, branch)
+  // console.log(`coursePath: ${coursePath}`)
+  // console.log(`org:        ${org}`)
+  // console.log(`repo:       ${repo}`)
+  // console.log(`branch:     ${branch}`)
+  // console.log(`personalAccessToken: ${personalAccessToken}`)
+
+  await uploadToRepoInternal(octo, coursePath, org, repo, branch, commitMessage)
 }
 
-const uploadToRepoInternal = async (octo, coursePath, org, repo, branch) => {
-  const content = await octo.repos.getContents({ owner: org, repo, path: 'a.txt', ref: branch })
-  console.log(`content: ${JSON.stringify(content)}`)
-  console.log(`content.data.download_url: ${content.data.download_url}`)
+const uploadToRepoInternal = async (octo, coursePath, org, repo, branch, commitMessage) => {
+  // gets commit's AND its tree's SHA
+  const currentCommit = await getCurrentCommit(octo, org, repo, branch)
+  // console.log(`currentCommit: ${JSON.stringify(currentCommit)}`)
 
-  const file = fs.createWriteStream("a.txt");
-  const request = https.get(content.data.download_url, function(response) {
-    response.pipe(file);
-  });
+  const filesPaths = await globby(coursePath)
+  const filesBlobs = await Promise.all(filesPaths.map(createBlobForFile(octo, org, repo)))
 
-  // // gets commit's AND its tree's SHA
-  // const currentCommit = await getCurrentCommit(octo, org, repo, branch)
-  // const filesPaths = await globby(coursePath)
-  // const filesBlobs = await Promise.all(filesPaths.map(createBlobForFile(octo, org, repo)))
-
-  // const pathsForBlobs = filesPaths.map(fullPath => path.relative(coursePath, fullPath))
+  const pathsForBlobs = filesPaths.map(fullPath => path.relative(coursePath, fullPath))
 
   // console.log(`currentCommit: ${JSON.stringify(currentCommit)}`)
   // console.log(`filesPaths:    ${filesPaths}`)
   // console.log(`filesBlobs:    ${filesBlobs}`)
   // console.log(`pathsForBlobs: ${pathsForBlobs}`)
 
-  // const newTree = await createNewTree(
-  //   octo,
-  //   org,
-  //   repo,
-  //   filesBlobs,
-  //   pathsForBlobs,
-  //   currentCommit.treeSha
-  // )
-  // const commitMessage = `My commit message`
-
+  const newTree = await createNewTree(
+    octo,
+    org,
+    repo,
+    filesBlobs,
+    pathsForBlobs,
+    currentCommit.treeSha
+  )
 
   // console.log(`newTree:       ${newTree}`)
 
+  const newCommit = await createNewCommit(
+    octo,
+    org,
+    repo,
+    commitMessage,
+    newTree.sha,
+    currentCommit.commitSha
+  )
+  // console.log(`newCommit:     ${newCommit}`)
 
-  // const newCommit = await createNewCommit(
-  //   octo,
-  //   org,
-  //   repo,
-  //   commitMessage,
-  //   newTree.sha,
-  //   currentCommit.commitSha
-  // )
-  // await setBranchToCommit(octo, org, repo, branch, newCommit.sha)
+  await setBranchToCommit(octo, org, repo, branch, newCommit.sha)
 }
 
 const getCurrentCommit = async (
@@ -155,14 +156,14 @@ const setBranchToCommit = (
   repo,
   branch,
   commitSha
-) =>
+) => {
   octo.git.updateRef({
-    owner: org,
-    repo,
-    ref: `heads/${branch}`,
-    sha: commitSha,
-})
-
+      owner: org,
+      repo,
+      ref: `heads/${branch}`,
+      sha: commitSha,
+  })
+}
 
 // const main = async () => {
 //   const ORGANIZATION = `k-nuth`
@@ -213,4 +214,6 @@ const setBranchToCommit = (
 
 
 
-module.exports = uploadToRepo;
+// module.exports = {
+//   uploadToRepo,
+// }
