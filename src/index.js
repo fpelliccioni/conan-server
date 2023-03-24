@@ -17,6 +17,8 @@ const expirationTime = 5; // seconds
 // -----------------------------------------------------------------------------
 
 function getAuth(authHeader) {
+    if (!authHeader) return undefined;
+
     const authType = authHeader.split(' ')[0];
     const credentials = authHeader.split(' ')[1];
 
@@ -24,10 +26,9 @@ function getAuth(authHeader) {
         return getBasicAuth(credentials);
     } else if (authType === 'Bearer') {
         return getBearerAuth(credentials);
-    } else {
-        console.log('Not supported auth type: ' + authType);
-        return null;
     }
+    console.log('Not supported auth type: ' + authType);
+    return undefined;
 }
 
 function getBasicAuth(credentials) {
@@ -58,23 +59,6 @@ function writeCommonHeaders(res) {
     res.set('X-Conan-Server-Version', '0.20.0');
     res.set('X-Conan-Server-Capabilities', 'complex_search,checksum_deploy,revisions,matrix_params');
 }
-
-// async function checkIfExists(owner, repo, branch, recipe_name, version, revision, package_id, authorization) {
-//     const octo = new Octokit()
-//     const path = `${recipe_name}/${version}/_/_/revisions/${revision}/packages/${package_id}/latest.json`;
-//     console.log(`path: ${path}`)
-
-//     try {
-//         const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
-//         console.log(`content: ${JSON.stringify(content)}`)
-//         // console.log(`content.data.download_url: ${content.data.download_url}`)
-//         return true;
-//     } catch (e) {
-//         console.log(`Error: ${e}`)
-//     }
-
-//     return false;
-// }
 
 function createTempDir() {
     const __dirname = path.resolve(path.dirname(''));
@@ -234,28 +218,64 @@ app.get('/api/:owner/:repo/:branch/v2/users/check_credentials', (req, res) => {
 
 // Get Recipe Informaton --------------------------------------------------------
 
-async function getGithubFileContent(owner, repo, branch, path) {
-    const octo = new Octokit()
+async function getGithubFileContent(owner, repo, branch, path, token = undefined) {
+    const octo = token ? new Octokit({ auth: token }) : new Octokit()
     try {
         const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
         // console.log(`content: ${JSON.stringify(content)}`)
         // console.log(`content.data.download_url: ${content.data.download_url}`)
         const download_url = content.data.download_url;
         const response = await fetch(download_url);
+
+        if (path.endsWith('.tgz')) {
+            // const buffer = await response.buffer();
+            const buffer = await response.arrayBuffer();
+            const view = new Uint8Array(buffer);
+            // const buffer = await response.buffer;
+
+            // console.log(`buffer: ${buffer.toString('hex')}`)
+            // console.log(`buffer: ${view}`)
+            // console.log(`buffer: ${view.toString('hex')}`)
+            return view;
+        }
+
         const text = await response.text();
         // console.log(`text: ${text}`)
         return text;
     } catch (error) {
         console.error(`Error: ${error}`);
-        return null;
+        return undefined;
     }
 }
+
+async function getGithubDirContent(owner, repo, branch, path, token = undefined) {
+    const octo = token ? new Octokit({ auth: token }) : new Octokit()
+    try {
+        const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
+        // console.log(`content: ${JSON.stringify(content)}`)
+        let files = {};
+        for (const file of content.data) {
+            if (file.type === 'file') {
+                files[file.name] = {};
+            }
+        }
+        return files;
+    } catch (error) {
+        // console.error(`Error: ${error}`);
+        return undefined;
+    }
+}
+
 
 app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
     const { owner, repo, branch, recipe_name, version } = req.params;
     const path = `${recipe_name}/${version}/latest.json`;
     console.log(`path: ${path}`)
-    const latest = await getGithubFileContent(owner, repo, branch, path)
+
+    const auth = req.header('Authorization');
+    const { token } = getAuth(auth);
+
+    const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -266,49 +286,41 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/latest', 
 });
 
 app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files', async (req, res) => {
-    // console.log(`req.params: ${JSON.stringify(req.params)}`);
-    // console.log(`req.headers: ${JSON.stringify(req.headers)}`);
-    // console.log(`req.body: ${JSON.stringify(req.body)}`);
-
     const { owner, repo, branch, recipe_name, version, revision } = req.params;
-
     const path = `${recipe_name}/${version}/${revision}/`;
     // console.log(`path: ${path}`)
 
-    const octo = new Octokit()
-    try {
-        const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
-        // console.log(`content: ${JSON.stringify(content)}`)
+    const auth = req.header('Authorization');
+    const { token } = getAuth(auth);
 
-        let files = {};
-        for (const file of content.data) {
-            // console.log(`file: ${JSON.stringify(file)}`)
-            // console.log(`file.name: ${file.name}`)
-            if (file.type === 'file') {
-                files[file.name] = {};
-            }
-        }
-
-        const json = {
-            "files": files
-        };
-
-        // console.log(`json: ${JSON.stringify(json)}`)
-
-        writeCommonHeaders(res);
-
-        res.set('Content-Type', 'application/json');
-        res.status(200).send(json);
-    } catch (error) {
-        res.status(404).send('Not found');
+    const files = await getGithubDirContent(owner, repo, branch, path, token);
+    if ( ! files) {
+        res.status(404).send();
+        // res.status(404).send('Not found');
+        return;
     }
+
+    const json = {
+        "files": files
+    };
+
+    // console.log(`json: ${JSON.stringify(json)}`)
+
+    writeCommonHeaders(res);
+
+    res.set('Content-Type', 'application/json');
+    res.status(200).send(json);
 });
 
 app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', async (req, res) => {
     const { owner, repo, branch, recipe_name, version, revision, file_name } = req.params;
     const path = `${recipe_name}/${version}/${revision}/${file_name}`;
     // console.log(`path: ${path}`)
-    const latest = await getGithubFileContent(owner, repo, branch, path)
+
+    const auth = req.header('Authorization');
+    const { token } = getAuth(auth);
+
+    const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -350,7 +362,11 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
 
     const path = `${recipe_name}/${version}/latest.json`;
     // console.log(`path: ${path}`)
-    const latest = await getGithubFileContent(owner, repo, branch, path)
+
+    const auth = req.header('Authorization');
+    const { token } = getAuth(auth);
+
+    const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -383,7 +399,11 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
 
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/latest.json`;
     // console.log(`path: ${path}`)
-    const latest = await getGithubFileContent(owner, repo, branch, path)
+
+    const auth = req.header('Authorization');
+    const { token } = getAuth(auth);
+
+    const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -396,53 +416,59 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
 });
 
 app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files', async (req, res) => {
-    // console.log(`req.params: ${JSON.stringify(req.params)}`);
-    // console.log(`req.headers: ${JSON.stringify(req.headers)}`);
-    // console.log(`req.body: ${JSON.stringify(req.body)}`);
-
-    // const octo = new Octokit()
-    // const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
-    // console.log(`content: ${JSON.stringify(content)}`)
-
-    // res.status(404).send('Not found');
-
-    // console.log(`req.params: ${JSON.stringify(req.params)}`);
-    // console.log(`req.headers: ${JSON.stringify(req.headers)}`);
-    // console.log(`req.body: ${JSON.stringify(req.body)}`);
-
     const { owner, repo, branch, recipe_name, version, revision, package_id, package_revision } = req.params;
 
     // const path = `${recipe_name}/${version}/${revision}/`;
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/`;
-    console.log(`path: ${path}`)
+    // console.log(`path: ${path}`)
 
-    const octo = new Octokit()
-    try {
-        const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
-        // console.log(`content: ${JSON.stringify(content)}`)
+    const auth = req.header('Authorization');
+    const { token } = getAuth(auth);
 
-        let files = {};
-        for (const file of content.data) {
-            // console.log(`file: ${JSON.stringify(file)}`)
-            // console.log(`file.name: ${file.name}`)
-            if (file.type === 'file') {
-                files[file.name] = {};
-            }
-        }
-
-        const json = {
-            "files": files
-        };
-
-        // console.log(`json: ${JSON.stringify(json)}`)
-
-        writeCommonHeaders(res);
-
-        res.set('Content-Type', 'application/json');
-        res.status(200).send(json);
-    } catch (error) {
-        res.status(404).send('Not found');
+    const files = await getGithubDirContent(owner, repo, branch, path, token);
+    if ( ! files) {
+        res.status(404).send();
+        // res.status(404).send('Not found');
+        return;
     }
+
+    const json = {
+        "files": files
+    };
+
+    // console.log(`json: ${JSON.stringify(json)}`)
+    writeCommonHeaders(res);
+
+    res.set('Content-Type', 'application/json');
+    res.status(200).send(json);
+
+    // const octo = new Octokit()
+    // try {
+    //     const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
+    //     // console.log(`content: ${JSON.stringify(content)}`)
+
+    //     let files = {};
+    //     for (const file of content.data) {
+    //         // console.log(`file: ${JSON.stringify(file)}`)
+    //         // console.log(`file.name: ${file.name}`)
+    //         if (file.type === 'file') {
+    //             files[file.name] = {};
+    //         }
+    //     }
+
+    //     const json = {
+    //         "files": files
+    //     };
+
+    //     // console.log(`json: ${JSON.stringify(json)}`)
+
+    //     writeCommonHeaders(res);
+
+    //     res.set('Content-Type', 'application/json');
+    //     res.status(200).send(json);
+    // } catch (error) {
+    //     res.status(404).send('Not found');
+    // }
 });
 
 app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', async (req, res) => {
@@ -451,26 +477,33 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
 
     // const path = `${recipe_name}/${version}/${revision}/${file_name}`;
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/${file_name}`;
-    console.log(`path: ${path}`)
-    const latest = await getGithubFileContent(owner, repo, branch, path)
+    // console.log(`path: ${path}`)
+
+    const auth = req.header('Authorization');
+    const { token } = getAuth(auth);
+
+    const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
     }
 
-    // console.log(`latest: ${latest}`);
-    // console.log(`latest.length: ${latest.length}`);
-
     writeCommonHeaders(res);
-
-    // if (file_name.endsWith('.txt')) {
-    //     res.set('Content-Type', 'text/plain');
-    // } else if (file_name.endsWith('.tgz')) {
-    //     res.set('Content-Type', 'application/x-gzip');
-    // } else if (file_name.endsWith('.py')) {
-    //     res.set('Content-Type', 'text/x-python');
-    // }
     setContentTypeForFile(res, file_name);
+
+    if (file_name.endsWith('.tgz')) {
+        // console.log(`latest: ${latest}`);
+        // console.log(`latest.length: ${latest.length}`);
+
+        res.writeHead(200, {
+            // 'Content-Type': mimetype,
+            'Content-disposition': 'attachment;filename=' + file_name,
+            'Content-Length': latest.length
+        });
+        res.end(Buffer.from(latest, 'binary'));
+
+        return;
+    }
 
     res.status(200).send(latest);
 });

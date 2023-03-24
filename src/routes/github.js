@@ -1,15 +1,9 @@
 import dotenv from 'dotenv';
 dotenv.config();
-// import express from 'express';
-// import morgan from 'morgan';
+
 import fs from 'fs';
 import Octokit from '@octokit/rest';
 import path from 'path';
-// import {encode, decode, labels} from 'windows-1252';
-// import getRawBody from 'raw-body';
-// import typeis from 'type-is';
-// import { readFile } from 'fs-extra';
-
 import pkg from 'fs-extra';
 const { readFile } = pkg;
 
@@ -96,18 +90,54 @@ const getCurrentCommit = async (
 
 // Notice that readFile's utf8 is typed differently from Github's utf-8
 const getFileAsUTF8 = (filePath) => readFile(filePath, 'utf8')
+const getFileAsBase64 = (filePath) => {
+  return readFile(filePath, 'base64')
+}
+
+const getFileSmart = (filePath) => {
+  const extension = path.extname(filePath)
+  if (extension === '.tgz') {
+    return getFileAsBase64(filePath)
+  }
+
+  return getFileAsUTF8(filePath)
+}
+
+const getEncoding = (filePath) => {
+  const extension = path.extname(filePath)
+  if (extension === '.tgz') {
+    return 'base64';
+  }
+
+  return 'utf-8'
+}
 
 const createBlobForFile = (octo, org, repo) => async (
   filePath
 ) => {
-  const content = await getFileAsUTF8(filePath)
+  // const content = await getFileAsUTF8(filePath)
+  // const blobData = await octo.git.createBlob({
+  //   owner: org,
+  //   repo,
+  //   content,
+  //   encoding: 'utf-8',
+  // })
+  // return blobData.data
+
+  const content = await getFileSmart(filePath)
   const blobData = await octo.git.createBlob({
     owner: org,
     repo,
     content,
-    encoding: 'utf-8',
+    encoding: getEncoding(filePath),
   })
+
+  console.log(`filePath: ${filePath}`)
+  console.log(`content: ${content}`)
+  console.log(`blobData: ${JSON.stringify(blobData)}`)
+
   return blobData.data
+
 }
 
 const createNewTree = async (
