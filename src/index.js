@@ -128,7 +128,7 @@ const appendContentType = (req, res, next) => {
 };
 app.use(appendContentType);
 app.use(morgan('dev'));
-app.use(express.raw());
+app.use(express.raw({limit: '50mb'}));
 app.use(express.urlencoded({extended:false}));
 app.use(express.json());
 app.use(express.text());

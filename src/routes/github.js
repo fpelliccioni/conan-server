@@ -132,9 +132,9 @@ const createBlobForFile = (octo, org, repo) => async (
     encoding: getEncoding(filePath),
   })
 
-  console.log(`filePath: ${filePath}`)
-  console.log(`content: ${content}`)
-  console.log(`blobData: ${JSON.stringify(blobData)}`)
+  // console.log(`filePath: ${filePath}`)
+  // console.log(`content: ${content}`)
+  // console.log(`blobData: ${JSON.stringify(blobData)}`)
 
   return blobData.data
 

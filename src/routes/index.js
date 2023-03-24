@@ -318,8 +318,8 @@ router.put('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisi
         fs.mkdirSync(dirPath, { recursive: true });
     }
 
-    console.log(`filePath: ${filePath}`);
-    console.log(`fileContent: ${fileContent}`);
+    // console.log(`filePath: ${filePath}`);
+    // console.log(`fileContent: ${fileContent}`);
     // console.log(`fileContent: ${JSON.stringify(fileContent)}`);
 
     res.status(500).send();
