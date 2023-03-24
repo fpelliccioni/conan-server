@@ -245,6 +245,18 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
 
     writeCommonHeaders(res);
     setContentTypeForFile(res, file_name);
+
+    if (file_name.endsWith('.tgz')) {
+        res.writeHead(200, {
+            // 'Content-Type': mimetype,
+            'Content-disposition': 'attachment;filename=' + file_name,
+            'Content-Length': latest.length
+        });
+        res.end(Buffer.from(latest, 'binary'));
+
+        return;
+    }
+
     res.status(200).send(latest);
 });
 
