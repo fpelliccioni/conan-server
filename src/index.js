@@ -122,17 +122,17 @@ app.use(express.text());
 
 // Authentication ---------------------------------------------------------------
 
-app.get('/api/:owner/:repo/:branch/v1/ping', (req, res) => {
+app.get('/api/v1/ping', (req, res) => {
     const anonymousId = req.header('X-Client-Anonymous-Id');
     const clientId = req.header('X-Client-Id');
     const auth = req.header('Authorization');
-    const { owner, repo, branch } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
 
     writeCommonHeaders(res);
     res.status(200).send();
 });
 
-app.get('/api/:owner/:repo/:branch/v2/users/authenticate', (req, res) => {
+app.get('/api/v2/users/authenticate', (req, res) => {
     const auth = req.header('Authorization');
     const { username, password } = getAuth(auth);
     const requestBody = req.body;
@@ -140,7 +140,7 @@ app.get('/api/:owner/:repo/:branch/v2/users/authenticate', (req, res) => {
     res.status(200).send(password);
 });
 
-app.get('/api/:owner/:repo/:branch/v2/users/check_credentials', (req, res) => {
+app.get('/api/v2/users/check_credentials', (req, res) => {
     const auth = req.header('Authorization');
     const { username, password } = getAuth(auth);
     writeCommonHeaders(res);
@@ -186,8 +186,9 @@ async function getGithubDirContent(owner, repo, branch, path, token = undefined)
     }
 }
 
-app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
-    const { owner, repo, branch, recipe_name, version } = req.params;
+app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
+    const { recipe_name, version } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/latest.json`;
     console.log(`path: ${path}`)
 
@@ -204,8 +205,9 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/latest', 
     res.status(200).send(latest);
 });
 
-app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files', async (req, res) => {
-    const { owner, repo, branch, recipe_name, version, revision } = req.params;
+app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files', async (req, res) => {
+    const { recipe_name, version, revision } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/`;
 
     const auth = req.header('Authorization');
@@ -227,8 +229,9 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
     res.status(200).send(json);
 });
 
-app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', async (req, res) => {
-    const { owner, repo, branch, recipe_name, version, revision, file_name } = req.params;
+app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', async (req, res) => {
+    const { recipe_name, version, revision, file_name } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/${file_name}`;
 
     const auth = req.header('Authorization');
@@ -245,8 +248,9 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
     res.status(200).send(latest);
 });
 
-app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) => {
-    const { owner, repo, branch, recipe_name, version } = req.params;
+app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) => {
+    const { recipe_name, version } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/latest.json`;
     const auth = req.header('Authorization');
     const { token } = getAuth(auth);
@@ -272,8 +276,9 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
     res.status(200).send(json);
 });
 
-app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/latest', async (req, res) => {
-    const { owner, repo, branch, recipe_name, version, revision, package_id } = req.params;
+app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/latest', async (req, res) => {
+    const { recipe_name, version, revision, package_id } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/latest.json`;
     const auth = req.header('Authorization');
     const { token } = getAuth(auth);
@@ -290,8 +295,9 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
 
 });
 
-app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files', async (req, res) => {
-    const { owner, repo, branch, recipe_name, version, revision, package_id, package_revision } = req.params;
+app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files', async (req, res) => {
+    const { recipe_name, version, revision, package_id, package_revision } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/`;
     const auth = req.header('Authorization');
     const { token } = getAuth(auth);
@@ -312,8 +318,9 @@ app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
     res.status(200).send(json);
 });
 
-app.get('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', async (req, res) => {
-    const { owner, repo, branch, recipe_name, version, revision, package_id, package_revision, file_name } = req.params;
+app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', async (req, res) => {
+    const { recipe_name, version, revision, package_id, package_revision, file_name } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/${file_name}`;
     const auth = req.header('Authorization');
     const { token } = getAuth(auth);
@@ -472,7 +479,7 @@ function getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision,
     return { key, value };
 }
 
-app.put('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
+app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
     const auth = req.header('Authorization');
     const checksumDeploy = req.header('X-Checksum-Deploy');
     const checksumSha1 = req.header('X-Checksum-Sha1');
@@ -490,7 +497,8 @@ app.put('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
         return;
     }
 
-    const { owner, repo, branch, recipe_name, version, revision, file_name } = req.params;
+    const { recipe_name, version, revision, file_name } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const { token } = getAuth(auth);
     const { key, value } = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
     const fileContent = req.body;
@@ -515,7 +523,7 @@ app.put('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
     justWriteFile(res, fileContent, filePath);
 });
 
-app.put('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
+app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
     const auth = req.header('Authorization');
     const checksumDeploy = req.header('X-Checksum-Deploy');
     const checksumSha1 = req.header('X-Checksum-Sha1');
@@ -533,7 +541,8 @@ app.put('/api/:owner/:repo/:branch/v2/conans/:recipe_name/:version/_/_/revisions
         return;
     }
 
-    const { owner, repo, branch, recipe_name, version, revision, package_id, package_revision, file_name } = req.params;
+    const { recipe_name, version, revision, package_id, package_revision, file_name } = req.params;
+    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const { token } = getAuth(auth);
     const { key, value } = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
 
