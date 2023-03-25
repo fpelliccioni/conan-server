@@ -193,7 +193,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
     console.log(`path: ${path}`)
 
     const auth = req.header('Authorization');
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
 
     const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
@@ -211,7 +211,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files', as
     const path = `${recipe_name}/${version}/${revision}/`;
 
     const auth = req.header('Authorization');
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
 
     const files = await getGithubDirContent(owner, repo, branch, path, token);
     if ( ! files) {
@@ -235,7 +235,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
     const path = `${recipe_name}/${version}/${revision}/${file_name}`;
 
     const auth = req.header('Authorization');
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
 
     const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
@@ -265,7 +265,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/latest.json`;
     const auth = req.header('Authorization');
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
 
     const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
@@ -293,7 +293,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/latest.json`;
     const auth = req.header('Authorization');
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
 
     const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
@@ -312,7 +312,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/`;
     const auth = req.header('Authorization');
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
 
     const files = await getGithubDirContent(owner, repo, branch, path, token);
     if ( ! files) {
@@ -335,7 +335,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/${file_name}`;
     const auth = req.header('Authorization');
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
 
     const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
@@ -511,7 +511,7 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
 
     const { recipe_name, version, revision, file_name } = req.params;
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
     const { key, value } = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
     const fileContent = req.body;
 
@@ -555,7 +555,7 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 
     const { recipe_name, version, revision, package_id, package_revision, file_name } = req.params;
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
-    const { token } = getAuth(auth);
+    const { token } = getAuth(auth) || {};
     const { key, value } = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
 
     const fileContent = req.body;
