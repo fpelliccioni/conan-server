@@ -27,7 +27,7 @@ function getAuth(authHeader) {
         return getBearerAuth(credentials);
     }
     console.log('Not supported auth type: ' + authType);
-    return undefined;
+    return { username: undefined, password: undefined, token: undefined };
 }
 
 function getBasicAuth(credentials) {
