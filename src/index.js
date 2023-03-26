@@ -135,6 +135,12 @@ app.get('/api/v1/ping', (req, res) => {
 app.get('/api/v2/users/authenticate', (req, res) => {
     const auth = req.header('Authorization');
     const { username, password } = getAuth(auth);
+
+    // console.log(`auth:     ${auth}`);
+    // console.log(`username: ${username}`);
+    // console.log(`password: ${password}`);
+
+
     const requestBody = req.body;
     writeCommonHeaders(res);
     res.status(200).send(password);
@@ -266,6 +272,8 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     const path = `${recipe_name}/${version}/latest.json`;
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
+    // console.log(`auth:  ${auth}`)
+    // console.log(`token: ${token}`)
 
     const latest = await getGithubFileContent(owner, repo, branch, path, token)
     if ( ! latest) {
@@ -465,7 +473,8 @@ async function writePackageLatestJson(tmpDir, owner, repo, branch, recipe_name, 
 }
 
 function getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token) {
-    const key = `${owner}/${repo}/${branch}/${recipe_name}/${version}`;
+    // const key = `${owner}/${repo}/${branch}/${recipe_name}/${version}`;
+    const key = `${token}/${owner}/${repo}/${branch}`;
 
     let value = myCache.get(key);
     if (value) {
