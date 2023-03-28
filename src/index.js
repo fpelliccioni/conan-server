@@ -158,6 +158,7 @@ app.get('/api/v2/users/check_credentials', (req, res) => {
 // Get Recipe Informaton --------------------------------------------------------
 
 async function getGithubFileContent(owner, repo, branch, path, token = undefined) {
+    console.log(`getGithubFileContent: ${owner}/${repo}/${branch}/${path}`);
     const octo = token ? new Octokit({ auth: token }) : new Octokit()
     try {
         const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
@@ -197,6 +198,7 @@ async function getGithubDirContent(owner, repo, branch, path, token = undefined)
 const getGithubFileContentMemoized = memoize(getGithubFileContent);
 const getGithubDirContentMemoized = memoize(getGithubDirContent);
 
+        //  /api/v2/conans/secp256k1/0.15.0/_/_/latest
 app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
     const { recipe_name, version } = req.params;
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
