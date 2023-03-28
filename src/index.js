@@ -9,6 +9,8 @@ import typeis from 'type-is';
 import { uploadToRepo } from './github.js';
 import crypto from 'crypto';
 import NodeCache from 'node-cache';
+import memoize from 'memoizee';
+// const memoize = require('memoizee');
 
 const app = express();
 const expirationTime = 5; // seconds
@@ -192,6 +194,9 @@ async function getGithubDirContent(owner, repo, branch, path, token = undefined)
     }
 }
 
+const getGithubFileContentMemoized = memoize(getGithubFileContent);
+const getGithubDirContentMemoized = memoize(getGithubDirContent);
+
 app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
     const { recipe_name, version } = req.params;
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
@@ -201,7 +206,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContent(owner, repo, branch, path, token)
+    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -219,7 +224,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files', as
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
 
-    const files = await getGithubDirContent(owner, repo, branch, path, token);
+    const files = await getGithubDirContentMemoized(owner, repo, branch, path, token);
     if ( ! files) {
         res.status(404).send();
         return;
@@ -243,7 +248,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContent(owner, repo, branch, path, token)
+    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -275,7 +280,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     // console.log(`auth:  ${auth}`)
     // console.log(`token: ${token}`)
 
-    const latest = await getGithubFileContent(owner, repo, branch, path, token)
+    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -303,7 +308,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContent(owner, repo, branch, path, token)
+    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -322,7 +327,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
 
-    const files = await getGithubDirContent(owner, repo, branch, path, token);
+    const files = await getGithubDirContentMemoized(owner, repo, branch, path, token);
     if ( ! files) {
         res.status(404).send();
         return;
@@ -345,7 +350,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContent(owner, repo, branch, path, token)
+    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
     if ( ! latest) {
         res.status(404).send();
         return;
