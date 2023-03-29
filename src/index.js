@@ -196,8 +196,28 @@ async function getGithubDirContent(owner, repo, branch, path, token = undefined)
     }
 }
 
+async function getGithubDirContentJustDirs(owner, repo, branch, path, token = undefined) {
+    console.log(`getGithubDirContentJustDirs: ${owner}/${repo}/${branch}/${path}`);
+    const octo = token ? new Octokit({ auth: token }) : new Octokit()
+    try {
+        const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
+        let files = {};
+        for (const file of content.data) {
+            console.log(`getGithubDirContentJustDirs: ${file.type}`);
+            if (file.type === 'dir') {
+                files[file.name] = {};
+            }
+        }
+        return files;
+    } catch (error) {
+        return undefined;
+    }
+}
+
+
 const getGithubFileContentMemoized = memoize(getGithubFileContent, { maxAge: 60000 }); // 1 minute
 const getGithubDirContentMemoized = memoize(getGithubDirContent, { maxAge: 60000 }); // 1 minute
+const getGithubDirContentJustDirsMemoized = memoize(getGithubDirContentJustDirs, { maxAge: 60000 }); // 1 minute
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
     const { recipe_name, version } = req.params;
@@ -287,16 +307,56 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
         res.status(404).send();
         return;
     }
+    const latestObj = JSON.parse(latest);
+    console.log(`latest: ${latest}`)
+    console.log(`latestObj: ${latestObj}`)
+
+    const tmp = new Date(latestObj.time)
+    tmp.setSeconds(olderTime.getSeconds() - 1);
+    const olderTime = tmp.toISOString().replace('Z', '+0000');
+    console.log(`olderTime: ${olderTime}`)
+
+    const allRevisions = await getGithubDirContentJustDirsMemoized(owner, repo, branch, path, token)
+    if ( ! allRevisions) {
+        res.status(404).send();
+        return;
+    }
+    console.log(`allRevisions: ${allRevisions}`)
+
+
+
+    let revisions = []
+    for (const name in allRevisions) {
+
+        if (name === latestObj.revision) {
+            revisions.push( {
+                revision: name,
+                time: latestObj.time
+              })
+        } else {
+            revisions.push( {
+                revision: name,
+                time: olderTime
+              })
+        }
+    }
+
+
 
     writeCommonHeaders(res);
 
-    const latestObj = JSON.parse(latest);
+
+    // const json = {
+    //     "reference": `${recipe_name}/${version}@_/_`,
+    //     "revisions": [
+    //         latestObj
+    //     ]
+    // }
+
 
     const json = {
         "reference": `${recipe_name}/${version}@_/_`,
-        "revisions": [
-            latestObj
-        ]
+        "revisions": revisions
     }
 
     res.set('Content-Type', 'application/json');
