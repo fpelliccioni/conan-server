@@ -210,6 +210,7 @@ async function getGithubDirContentJustDirs(owner, repo, branch, path, token = un
         }
         return files;
     } catch (error) {
+        console.log(`getGithubDirContent error: ${JSON.stringify(error)}`);
         return undefined;
     }
 }
@@ -296,13 +297,21 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) => {
     const { recipe_name, version } = req.params;
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
-    const path = `${recipe_name}/${version}/latest.json`;
+
+    const dirPath = `${recipe_name}/${version}`;
+    // const path = `${recipe_name}/${version}/latest.json`;
+    const jsonPath = `${dirPath}/latest.json`;
+
+    console.log(`dirPath: ${dirPath}`)
+    console.log(`jsonPath: ${jsonPath}`)
+
+
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
     // console.log(`auth:  ${auth}`)
     // console.log(`token: ${token}`)
 
-    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
+    const latest = await getGithubFileContentMemoized(owner, repo, branch, jsonPath, token)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -317,7 +326,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     const olderTime = tmp.toISOString().replace('Z', '+0000');
     console.log(`olderTime: ${olderTime}`)
 
-    const allRevisions = await getGithubDirContentJustDirsMemoized(owner, repo, branch, path, token)
+    const allRevisions = await getGithubDirContentJustDirsMemoized(owner, repo, branch, dirPath, token)
     if ( ! allRevisions) {
         res.status(404).send();
         return;
