@@ -310,6 +310,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     const latestObj = JSON.parse(latest);
     console.log(`latest: ${latest}`)
     console.log(`latestObj: ${latestObj}`)
+    console.log(`latestObj.time: ${latestObj.time}`)
 
     const tmp = new Date(latestObj.time)
     tmp.setSeconds(tmp.getSeconds() - 1);
@@ -322,8 +323,6 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
         return;
     }
     console.log(`allRevisions: ${allRevisions}`)
-
-
 
     let revisions = []
     for (const name in allRevisions) {
@@ -340,6 +339,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
               })
         }
     }
+    console.log(`revisions: ${JSON.stringify(revisions)}`)
 
     writeCommonHeaders(res);
 
@@ -355,6 +355,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
         "reference": `${recipe_name}/${version}@_/_`,
         "revisions": revisions
     }
+    console.log(`json: ${JSON.stringify(json)}`)
 
     res.set('Content-Type', 'application/json');
     res.status(200).send(json);
