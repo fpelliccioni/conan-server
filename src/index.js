@@ -312,7 +312,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     console.log(`latestObj: ${latestObj}`)
 
     const tmp = new Date(latestObj.time)
-    tmp.setSeconds(olderTime.getSeconds() - 1);
+    tmp.setSeconds(tmp.getSeconds() - 1);
     const olderTime = tmp.toISOString().replace('Z', '+0000');
     console.log(`olderTime: ${olderTime}`)
 
@@ -341,10 +341,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
         }
     }
 
-
-
     writeCommonHeaders(res);
-
 
     // const json = {
     //     "reference": `${recipe_name}/${version}@_/_`,
