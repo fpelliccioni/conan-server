@@ -203,14 +203,14 @@ async function getGithubDirContentJustDirs(owner, repo, branch, path, token = un
         const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
         let files = {};
         for (const file of content.data) {
-            console.log(`getGithubDirContentJustDirs: ${file.type}`);
+            // console.log(`getGithubDirContentJustDirs: ${file.type}`);
             if (file.type === 'dir') {
                 files[file.name] = {};
             }
         }
         return files;
     } catch (error) {
-        console.log(`getGithubDirContent error: ${JSON.stringify(error)}`);
+        // console.log(`getGithubDirContent error: ${JSON.stringify(error)}`);
         return undefined;
     }
 }
@@ -299,12 +299,10 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
 
     const dirPath = `${recipe_name}/${version}`;
-    // const path = `${recipe_name}/${version}/latest.json`;
     const jsonPath = `${dirPath}/latest.json`;
 
-    console.log(`dirPath: ${dirPath}`)
-    console.log(`jsonPath: ${jsonPath}`)
-
+    // console.log(`dirPath: ${dirPath}`)
+    // console.log(`jsonPath: ${jsonPath}`)
 
     const auth = req.header('Authorization');
     const { token } = getAuth(auth) || {};
@@ -317,21 +315,21 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
         return;
     }
     const latestObj = JSON.parse(latest);
-    console.log(`latest: ${latest}`)
-    console.log(`latestObj: ${latestObj}`)
-    console.log(`latestObj.time: ${latestObj.time}`)
+    // console.log(`latest: ${latest}`)
+    // console.log(`latestObj: ${latestObj}`)
+    // console.log(`latestObj.time: ${latestObj.time}`)
 
     const tmp = new Date(latestObj.time)
     tmp.setSeconds(tmp.getSeconds() - 1);
     const olderTime = tmp.toISOString().replace('Z', '+0000');
-    console.log(`olderTime: ${olderTime}`)
+    // console.log(`olderTime: ${olderTime}`)
 
     const allRevisions = await getGithubDirContentJustDirsMemoized(owner, repo, branch, dirPath, token)
     if ( ! allRevisions) {
         res.status(404).send();
         return;
     }
-    console.log(`allRevisions: ${allRevisions}`)
+    // console.log(`allRevisions: ${allRevisions}`)
 
     let revisions = []
     for (const name in allRevisions) {
@@ -348,7 +346,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
               })
         }
     }
-    console.log(`revisions: ${JSON.stringify(revisions)}`)
+    // console.log(`revisions: ${JSON.stringify(revisions)}`)
 
     writeCommonHeaders(res);
 
@@ -364,7 +362,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
         "reference": `${recipe_name}/${version}@_/_`,
         "revisions": revisions
     }
-    console.log(`json: ${JSON.stringify(json)}`)
+    // console.log(`json: ${JSON.stringify(json)}`)
 
     res.set('Content-Type', 'application/json');
     res.status(200).send(json);
