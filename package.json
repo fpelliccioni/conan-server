@@ -29,6 +29,7 @@
     "morgan": "^1.10.0",
     "node-cache": "^5.1.2",
     "raw-body": "^2.5.2",
+    "simple-git": "^3.18.0",
     "type-is": "^1.6.18",
     "typescript": "^5.0.2",
     "utf8-to-ansi": "^1.0.3",

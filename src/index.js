@@ -1,6 +1,6 @@
 import express from 'express';
 import morgan from 'morgan';
-import fs from 'fs';
+// import fs from 'fs';
 import Octokit from '@octokit/rest';
 import path from 'path';
 import {encode, decode, labels} from 'windows-1252';
@@ -11,9 +11,22 @@ import crypto from 'crypto';
 import NodeCache from 'node-cache';
 import memoize from 'memoizee';
 // const memoize = require('memoizee');
+// const git = require('simple-git')();
+import git from 'simple-git';
+import { promises as fs } from 'fs';
 
 const app = express();
 const expirationTime = 5; // seconds
+
+
+async function performGithubPull() {
+    console.log(`Github Repo Dir: ${process.env.GIT_REPO_DIR}`);
+
+    const gitRepo = git(process.env.GIT_REPO_DIR);
+    const status = await gitRepo.status();
+    console.log(status);
+    await gitRepo.pull();
+}
 
 // -----------------------------------------------------------------------------
 
@@ -157,79 +170,152 @@ app.get('/api/v2/users/check_credentials', (req, res) => {
 
 // Get Recipe Informaton --------------------------------------------------------
 
-async function getGithubFileContent(owner, repo, branch, path, token = undefined) {
-    console.log(`getGithubFileContent: ${owner}/${repo}/${branch}/${path}`);
-    const octo = token ? new Octokit({ auth: token }) : new Octokit()
-    try {
-        const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
-        const download_url = content.data.download_url;
-        const response = await fetch(download_url);
+// async function getGithubRemoteFileContent(owner, repo, branch, path, token = undefined) {
+//     console.log(`getGithubRemoteFileContent: ${owner}/${repo}/${branch}/${path}`);
+//     const octo = token ? new Octokit({ auth: token }) : new Octokit()
+//     try {
+//         const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
+//         const download_url = content.data.download_url;
+//         const response = await fetch(download_url);
 
-        if (path.endsWith('.tgz')) {
-            const buffer = await response.arrayBuffer();
-            const view = new Uint8Array(buffer);
+//         if (path.endsWith('.tgz')) {
+//             const buffer = await response.arrayBuffer();
+//             const view = new Uint8Array(buffer);
+//             return view;
+//         }
+
+//         const text = await response.text();
+//         return text;
+//     } catch (error) {
+//         console.error(`Error: ${error}`);
+//         return undefined;
+//     }
+// }
+
+// async function getGithubRemoteDirContent(owner, repo, branch, path, token = undefined) {
+//     console.log(`getGithubRemoteDirContent: ${owner}/${repo}/${branch}/${path}`);
+//     const octo = token ? new Octokit({ auth: token }) : new Octokit()
+//     try {
+//         const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
+//         let files = {};
+//         for (const file of content.data) {
+//             if (file.type === 'file') {
+//                 files[file.name] = {};
+//             }
+//         }
+//         return files;
+//     } catch (error) {
+//         return undefined;
+//     }
+// }
+
+// async function getGithubRemoteDirContentJustDirs(owner, repo, branch, path, token = undefined) {
+//     console.log(`getGithubRemoteDirContentJustDirs: ${owner}/${repo}/${branch}/${path}`);
+//     const octo = token ? new Octokit({ auth: token }) : new Octokit()
+//     try {
+//         const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
+//         let files = {};
+//         for (const file of content.data) {
+//             // console.log(`getGithubRemoteDirContentJustDirs: ${file.type}`);
+//             if (file.type === 'dir') {
+//                 files[file.name] = {};
+//             }
+//         }
+//         return files;
+//     } catch (error) {
+//         // console.log(`getGithubRemoteDirContent error: ${JSON.stringify(error)}`);
+//         return undefined;
+//     }
+// }
+
+// const getGithubRemoteFileContentMemoized = memoize(getGithubRemoteFileContent, { maxAge: 60000 }); // 1 minute
+// const getGithubRemoteDirContentMemoized = memoize(getGithubRemoteDirContent, { maxAge: 60000 }); // 1 minute
+// const getGithubRemoteDirContentJustDirsMemoized = memoize(getGithubRemoteDirContentJustDirs, { maxAge: 60000 }); // 1 minute
+
+
+async function readBinaryFile(filePath) {
+    const buffer = await fs.readFile(filePath);
+    const uint8Array = new Uint8Array(buffer);
+    return uint8Array;
+}
+
+async function getGithubLocalFileContent(relativePath) {
+    // console.log(`getGithubLocalFileContent: ${relativePath}`);
+    // console.log(`TypeOf relativePath: ${typeof relativePath}`);
+
+    const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
+    // console.log(`fullPath: ${fullPath}`);
+
+    try {
+        if (fullPath.endsWith('.tgz')) {
+            const view = await readBinaryFile(fullPath);
             return view;
         }
 
-        const text = await response.text();
+        const text = await fs.readFile(fullPath, 'utf-8');
         return text;
     } catch (error) {
-        console.error(`Error: ${error}`);
+        // console.error(`Error: ${error}`);
         return undefined;
     }
 }
 
-async function getGithubDirContent(owner, repo, branch, path, token = undefined) {
-    console.log(`getGithubDirContent: ${owner}/${repo}/${branch}/${path}`);
-    const octo = token ? new Octokit({ auth: token }) : new Octokit()
+async function getGithubLocalDirContent(relativePath) {
+    // console.log(`getGithubLocalDirContent: ${relativePath}`);
+    const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
+    // console.log(`fullPath: ${fullPath}`);
+
     try {
-        const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
-        let files = {};
-        for (const file of content.data) {
-            if (file.type === 'file') {
-                files[file.name] = {};
-            }
-        }
+        const entries = await fs.readdir(fullPath, { withFileTypes: true });
+        const files = entries
+            .filter(entry => entry.isFile())
+            .reduce((acc, entry) => {
+                acc[entry.name] = {};
+                return acc;
+            }, {});
         return files;
     } catch (error) {
         return undefined;
     }
 }
 
-async function getGithubDirContentJustDirs(owner, repo, branch, path, token = undefined) {
-    console.log(`getGithubDirContentJustDirs: ${owner}/${repo}/${branch}/${path}`);
-    const octo = token ? new Octokit({ auth: token }) : new Octokit()
+async function getGithubLocalDirContentJustDirs(relativePath) {
+    // console.log(`getGithubLocalDirContentJustDirs: ${relativePath}`);
+    const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
+    // console.log(`fullPath: ${fullPath}`);
+
     try {
-        const content = await octo.repos.getContents({ owner, repo, path, ref: branch })
-        let files = {};
-        for (const file of content.data) {
-            // console.log(`getGithubDirContentJustDirs: ${file.type}`);
-            if (file.type === 'dir') {
-                files[file.name] = {};
-            }
-        }
-        return files;
+        const entries = await fs.readdir(fullPath, { withFileTypes: true });
+        const directories = entries
+            .filter(entry => entry.isDirectory())
+            .reduce((acc, entry) => {
+                acc[entry.name] = {};
+                return acc;
+              }, {});
+        // console.log(`directories: ${JSON.stringify(directories)}`);
+        return directories;
     } catch (error) {
-        // console.log(`getGithubDirContent error: ${JSON.stringify(error)}`);
+        // console.log(`error: ${error.message}`);
         return undefined;
     }
 }
 
+const getGithubLocalFileContentMemoized = memoize(getGithubLocalFileContent, { maxAge: 60000 }); // 1 minute
+const getGithubLocalDirContentMemoized = memoize(getGithubLocalDirContent, { maxAge: 60000 }); // 1 minute
+const getGithubLocalDirContentJustDirsMemoized = memoize(getGithubLocalDirContentJustDirs, { maxAge: 60000 }); // 1 minute
 
-const getGithubFileContentMemoized = memoize(getGithubFileContent, { maxAge: 60000 }); // 1 minute
-const getGithubDirContentMemoized = memoize(getGithubDirContent, { maxAge: 60000 }); // 1 minute
-const getGithubDirContentJustDirsMemoized = memoize(getGithubDirContentJustDirs, { maxAge: 60000 }); // 1 minute
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
     const { recipe_name, version } = req.params;
-    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
+    // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/latest.json`;
     console.log(`path: ${path}`)
 
-    const auth = req.header('Authorization');
-    const { token } = getAuth(auth) || {};
+    // const auth = req.header('Authorization');
+    // const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
+    // const latest = await getGithubRemoteFileContentMemoized(owner, repo, branch, path, token)
+    const latest = await getGithubLocalFileContentMemoized(path)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -241,13 +327,14 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/latest', async (req, res) => {
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files', async (req, res) => {
     const { recipe_name, version, revision } = req.params;
-    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
+    // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/`;
 
-    const auth = req.header('Authorization');
-    const { token } = getAuth(auth) || {};
+    // const auth = req.header('Authorization');
+    // const { token } = getAuth(auth) || {};
 
-    const files = await getGithubDirContentMemoized(owner, repo, branch, path, token);
+    // const files = await getGithubRemoteDirContentMemoized(owner, repo, branch, path, token);
+    const files = await getGithubLocalDirContentMemoized(path);
     if ( ! files) {
         res.status(404).send();
         return;
@@ -265,13 +352,14 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files', as
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', async (req, res) => {
     const { recipe_name, version, revision, file_name } = req.params;
-    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
+    // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/${file_name}`;
 
-    const auth = req.header('Authorization');
-    const { token } = getAuth(auth) || {};
+    // const auth = req.header('Authorization');
+    // const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
+    // const latest = await getGithubRemoteFileContentMemoized(owner, repo, branch, path, token)
+    const latest = await getGithubLocalFileContentMemoized(path)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -296,20 +384,21 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) => {
     const { recipe_name, version } = req.params;
-    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
+    // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
 
     const dirPath = `${recipe_name}/${version}`;
     const jsonPath = `${dirPath}/latest.json`;
 
-    // console.log(`dirPath: ${dirPath}`)
-    // console.log(`jsonPath: ${jsonPath}`)
+    console.log(`dirPath: ${dirPath}`)
+    console.log(`jsonPath: ${jsonPath}`)
 
-    const auth = req.header('Authorization');
-    const { token } = getAuth(auth) || {};
+    // const auth = req.header('Authorization');
+    // const { token } = getAuth(auth) || {};
     // console.log(`auth:  ${auth}`)
     // console.log(`token: ${token}`)
 
-    const latest = await getGithubFileContentMemoized(owner, repo, branch, jsonPath, token)
+    // const latest = await getGithubRemoteFileContentMemoized(owner, repo, branch, jsonPath, token)
+    const latest = await getGithubLocalFileContentMemoized(jsonPath)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -324,7 +413,8 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     const olderTime = tmp.toISOString().replace('Z', '+0000');
     // console.log(`olderTime: ${olderTime}`)
 
-    const allRevisions = await getGithubDirContentJustDirsMemoized(owner, repo, branch, dirPath, token)
+    // const allRevisions = await getGithubRemoteDirContentJustDirsMemoized(owner, repo, branch, dirPath, token)
+    const allRevisions = await getGithubLocalDirContentJustDirsMemoized(dirPath)
     if ( ! allRevisions) {
         res.status(404).send();
         return;
@@ -370,12 +460,13 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/latest', async (req, res) => {
     const { recipe_name, version, revision, package_id } = req.params;
-    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
+    // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/latest.json`;
-    const auth = req.header('Authorization');
-    const { token } = getAuth(auth) || {};
+    // const auth = req.header('Authorization');
+    // const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
+    // const latest = await getGithubRemoteFileContentMemoized(owner, repo, branch, path, token)
+    const latest = await getGithubLocalFileContentMemoized(path)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -389,12 +480,13 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files', async (req, res) => {
     const { recipe_name, version, revision, package_id, package_revision } = req.params;
-    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
+    // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/`;
-    const auth = req.header('Authorization');
-    const { token } = getAuth(auth) || {};
+    // const auth = req.header('Authorization');
+    // const { token } = getAuth(auth) || {};
 
-    const files = await getGithubDirContentMemoized(owner, repo, branch, path, token);
+    // const files = await getGithubRemoteDirContentMemoized(owner, repo, branch, path, token);
+    const files = await getGithubLocalDirContentMemoized(path);
     if ( ! files) {
         res.status(404).send();
         return;
@@ -412,12 +504,13 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', async (req, res) => {
     const { recipe_name, version, revision, package_id, package_revision, file_name } = req.params;
-    const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
+    // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const path = `${recipe_name}/${version}/${revision}/packages/${package_id}/${package_revision}/${file_name}`;
-    const auth = req.header('Authorization');
-    const { token } = getAuth(auth) || {};
+    // const auth = req.header('Authorization');
+    // const { token } = getAuth(auth) || {};
 
-    const latest = await getGithubFileContentMemoized(owner, repo, branch, path, token)
+    // const latest = await getGithubRemoteFileContentMemoized(owner, repo, branch, path, token)
+    const latest = await getGithubLocalFileContentMemoized(path)
     if ( ! latest) {
         res.status(404).send();
         return;
@@ -661,6 +754,11 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 
 // ----------------------------------------------------------------------------------------------------------------------------
 
+await performGithubPull();
+
+// ----------------------------------------------------------------------------------------------------------------------------
+
+
 app.listen(app.get('port'),()=>{
     console.log(`Server listening on port ${app.get('port')}`);
 });
@@ -685,6 +783,7 @@ myCache.on("expired", async function(key, value){
     const commitMessage = getCommitMessage(recipe_name, version, revision);
     await nonThrowingUploadToRepo(token, uploadPath, owner, repo, branch, commitMessage);
 
+    await performGithubPull();
+
     cleanUpTmpDir(tmpDir);
 });
-
