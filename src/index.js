@@ -247,7 +247,9 @@ async function getGithubLocalFileContent(relativePath) {
     // console.log(`fullPath: ${fullPath}`);
 
     const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
+    console.log(`fullPath: ${fullPath}`);
     if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+        console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
 
@@ -271,7 +273,9 @@ async function getGithubLocalDirContent(relativePath) {
     // console.log(`fullPath: ${fullPath}`);
 
     const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
+    console.log(`fullPath: ${fullPath}`);
     if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+        console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
 
@@ -296,7 +300,9 @@ async function getGithubLocalDirContentJustDirs(relativePath) {
 
 
     const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
+    console.log(`fullPath: ${fullPath}`);
     if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+        console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
 
