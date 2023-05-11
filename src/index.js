@@ -243,8 +243,13 @@ async function getGithubLocalFileContent(relativePath) {
     // console.log(`getGithubLocalFileContent: ${relativePath}`);
     // console.log(`TypeOf relativePath: ${typeof relativePath}`);
 
-    const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
+    // const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
     // console.log(`fullPath: ${fullPath}`);
+
+    const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
+    if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+        return undefined;
+    }
 
     try {
         if (fullPath.endsWith('.tgz')) {
@@ -262,8 +267,13 @@ async function getGithubLocalFileContent(relativePath) {
 
 async function getGithubLocalDirContent(relativePath) {
     // console.log(`getGithubLocalDirContent: ${relativePath}`);
-    const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
+    // const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
     // console.log(`fullPath: ${fullPath}`);
+
+    const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
+    if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+        return undefined;
+    }
 
     try {
         const entries = await fs.readdir(fullPath, { withFileTypes: true });
@@ -281,8 +291,14 @@ async function getGithubLocalDirContent(relativePath) {
 
 async function getGithubLocalDirContentJustDirs(relativePath) {
     // console.log(`getGithubLocalDirContentJustDirs: ${relativePath}`);
-    const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
+    // const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
     // console.log(`fullPath: ${fullPath}`);
+
+
+    const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
+    if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+        return undefined;
+    }
 
     try {
         const entries = await fs.readdir(fullPath, { withFileTypes: true });
