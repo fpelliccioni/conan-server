@@ -1,6 +1,5 @@
 import express from 'express';
 import morgan from 'morgan';
-// import fs from 'fs';
 import Octokit from '@octokit/rest';
 import path from 'path';
 import {encode, decode, labels} from 'windows-1252';
@@ -13,7 +12,8 @@ import memoize from 'memoizee';
 // const memoize = require('memoizee');
 // const git = require('simple-git')();
 import git from 'simple-git';
-import { promises as fs } from 'fs';
+import { promises as fsPro } from 'fs';
+import fs from 'fs';
 
 const app = express();
 const expirationTime = 5; // seconds
@@ -234,7 +234,7 @@ app.get('/api/v2/users/check_credentials', (req, res) => {
 
 
 async function readBinaryFile(filePath) {
-    const buffer = await fs.readFile(filePath);
+    const buffer = await fsPro.readFile(filePath);
     const uint8Array = new Uint8Array(buffer);
     return uint8Array;
 }
@@ -247,7 +247,7 @@ async function getGithubLocalFileContent(relativePath) {
     // console.log(`fullPath: ${fullPath}`);
 
     const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
-    console.log(`fullPath: ${fullPath}`);
+    // console.log(`fullPath: ${fullPath}`);
     if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
         console.log(`... not in GIT_REPO_DIR`);
         return undefined;
@@ -259,7 +259,7 @@ async function getGithubLocalFileContent(relativePath) {
             return view;
         }
 
-        const text = await fs.readFile(fullPath, 'utf-8');
+        const text = await fsPro.readFile(fullPath, 'utf-8');
         return text;
     } catch (error) {
         // console.error(`Error: ${error}`);
@@ -273,14 +273,14 @@ async function getGithubLocalDirContent(relativePath) {
     // console.log(`fullPath: ${fullPath}`);
 
     const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
-    console.log(`fullPath: ${fullPath}`);
+    // console.log(`fullPath: ${fullPath}`);
     if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
         console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
 
     try {
-        const entries = await fs.readdir(fullPath, { withFileTypes: true });
+        const entries = await fsPro.readdir(fullPath, { withFileTypes: true });
         const files = entries
             .filter(entry => entry.isFile())
             .reduce((acc, entry) => {
@@ -300,14 +300,14 @@ async function getGithubLocalDirContentJustDirs(relativePath) {
 
 
     const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
-    console.log(`fullPath: ${fullPath}`);
+    // console.log(`fullPath: ${fullPath}`);
     if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
         console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
 
     try {
-        const entries = await fs.readdir(fullPath, { withFileTypes: true });
+        const entries = await fsPro.readdir(fullPath, { withFileTypes: true });
         const directories = entries
             .filter(entry => entry.isDirectory())
             .reduce((acc, entry) => {
@@ -411,8 +411,8 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     const dirPath = `${recipe_name}/${version}`;
     const jsonPath = `${dirPath}/latest.json`;
 
-    console.log(`dirPath: ${dirPath}`)
-    console.log(`jsonPath: ${jsonPath}`)
+    // console.log(`dirPath: ${dirPath}`)
+    // console.log(`jsonPath: ${jsonPath}`)
 
     // const auth = req.header('Authorization');
     // const { token } = getAuth(auth) || {};
