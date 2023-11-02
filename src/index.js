@@ -555,6 +555,34 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     res.status(200).send(latest);
 });
 
+// SEARCH endpoints ------------------------------------------------------------
+
+// GET /api/v2/conans/search?q=zlib%2F%2A
+
+
+// https://center.conan.io
+// https://packages.kth.cash/api
+
+// curl -X GET "https://packages.kth.cash/api/v2/conans/secp256k1/0.18.0/_/_/latest"
+
+// curl -X GET "https://center.conan.io/v2/conans/search?q=zlib%2F%2A"
+
+app.get('/api/v2/conans/search', async (req, res) => {
+
+    const q = req.query.q;
+    const [recipe_name, version] = q.split('/');
+    console.log(`recipe_name: ${recipe_name}`);
+    console.log(`version: ${version}`);
+
+    const json = {
+        "results": []
+    };
+
+    writeCommonHeaders(res);
+    res.set('Content-Type', 'application/json');
+    res.status(200).send(json);
+});
+
 // PUT endpoints ---------------------------------------------------------------
 
 function getLatestInJson(revision) {
