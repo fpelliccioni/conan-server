@@ -18,6 +18,13 @@ import fs from 'fs';
 const app = express();
 const expirationTime = 5; // seconds
 
+process.on('uncaughtException', (err) => {
+    console.error(`[uncaughtException] ${err && err.stack ? err.stack : err}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error(`[unhandledRejection] ${reason && reason.stack ? reason.stack : reason}`);
+});
 
 async function performGithubPull() {
     console.log(`Github Repo Dir: ${process.env.GIT_REPO_DIR}`);
@@ -71,31 +78,13 @@ function createTempDir() {
       fs.mkdirSync(tmpDirBase);
     }
 
-    let tmpDir;
     const appPrefix = 'upload-';
     try {
-        tmpDir = fs.mkdtempSync(path.join(tmpDirBase, appPrefix));
-
-        if (!fs.existsSync(tmpDir)) {
-            fs.mkdirSync(tmpDir);
-          }
-
-        return tmpDir;
+        return fs.mkdtempSync(path.join(tmpDirBase, appPrefix));
+    } catch (e) {
+        console.error(`Error creating temp dir: ${e}`);
+        return undefined;
     }
-    catch {
-      // handle error
-    }
-    finally {
-      try {
-        if (tmpDir) {
-          fs.rmSync(tmpDir, { recursive: true });
-        }
-      }
-      catch (e) {
-        console.error(`An error has occurred while removing the temp folder at ${tmpDir}. Please remove it manually. Error: ${e}`);
-      }
-    }
-    return undefined;
 }
 
 function getContentTypeForFile(file_name) {
@@ -736,7 +725,13 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
     const { recipe_name, version, revision, file_name } = req.params;
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const { token } = getAuth(auth) || {};
-    const { key, value } = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
+    const cacheEntry = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
+    if (!cacheEntry) {
+        console.error(`Failed to obtain cache entry for ${recipe_name}/${version}/${revision}`);
+        res.status(500).send();
+        return;
+    }
+    const { key, value } = cacheEntry;
     const fileContent = req.body;
 
     if  ( ! verifyFileContent(fileContent, checksumSha1)) {
@@ -780,7 +775,13 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
     const { recipe_name, version, revision, package_id, package_revision, file_name } = req.params;
     const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
     const { token } = getAuth(auth) || {};
-    const { key, value } = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
+    const cacheEntry = getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision, token);
+    if (!cacheEntry) {
+        console.error(`Failed to obtain cache entry for ${recipe_name}/${version}/${revision} package ${package_id}/${package_revision}`);
+        res.status(500).send();
+        return;
+    }
+    const { key, value } = cacheEntry;
 
     const fileContent = req.body;
     if  ( ! verifyFileContent(fileContent, checksumSha1)) {
@@ -804,7 +805,11 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 
 // ----------------------------------------------------------------------------------------------------------------------------
 
-await performGithubPull();
+try {
+    await performGithubPull();
+} catch (err) {
+    console.error(`[startup] performGithubPull failed, continuing anyway: ${err && err.stack ? err.stack : err}`);
+}
 
 // ----------------------------------------------------------------------------------------------------------------------------
 
@@ -816,24 +821,32 @@ app.listen(app.get('port'),()=>{
 const myCache = new NodeCache( { stdTTL: expirationTime, checkperiod: 2 } )
 
 myCache.on("expired", async function(key, value){
-    console.log(`${key} Cache Expired, uploading to repo...`);
+    try {
+        console.log(`${key} Cache Expired, uploading to repo...`);
 
-    const { token, owner, repo, branch, recipe_name, version, tmpDir, revision } = value;
+        const { token, owner, repo, branch, recipe_name, version, tmpDir, revision } = value;
 
-    console.log(`owner: ${owner}`);
-    console.log(`repo: ${repo}`);
-    console.log(`branch: ${branch}`);
-    console.log(`recipe_name: ${recipe_name}`);
-    console.log(`version: ${version}`);
-    console.log(`revision: ${revision}`);
-    console.log(`tmpDir: ${tmpDir}`);
+        console.log(`owner: ${owner}`);
+        console.log(`repo: ${repo}`);
+        console.log(`branch: ${branch}`);
+        console.log(`recipe_name: ${recipe_name}`);
+        console.log(`version: ${version}`);
+        console.log(`revision: ${revision}`);
+        console.log(`tmpDir: ${tmpDir}`);
 
-    const uploadPath = getUploadPath(tmpDir, owner, repo, branch);
+        const uploadPath = getUploadPath(tmpDir, owner, repo, branch);
 
-    const commitMessage = getCommitMessage(recipe_name, version, revision);
-    await nonThrowingUploadToRepo(token, uploadPath, owner, repo, branch, commitMessage);
+        const commitMessage = getCommitMessage(recipe_name, version, revision);
+        await nonThrowingUploadToRepo(token, uploadPath, owner, repo, branch, commitMessage);
 
-    await performGithubPull();
+        try {
+            await performGithubPull();
+        } catch (pullErr) {
+            console.error(`[expired] performGithubPull failed: ${pullErr && pullErr.stack ? pullErr.stack : pullErr}`);
+        }
 
-    cleanUpTmpDir(tmpDir);
+        cleanUpTmpDir(tmpDir);
+    } catch (err) {
+        console.error(`[expired] handler failed for key ${key}: ${err && err.stack ? err.stack : err}`);
+    }
 });

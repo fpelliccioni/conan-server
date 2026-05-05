@@ -180,14 +180,14 @@ const createNewCommit = async (
     parents: [currentCommitSha],
   })).data
 
-const setBranchToCommit = (
+const setBranchToCommit = async (
   octo,
   org,
   repo,
   branch,
   commitSha
 ) => {
-  octo.git.updateRef({
+  await octo.git.updateRef({
       owner: org,
       repo,
       ref: `heads/${branch}`,
