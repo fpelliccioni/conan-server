@@ -556,20 +556,52 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 
 // curl -X GET "https://center.conan.io/v2/conans/search?q=zlib%2F%2A"
 
+function globToRegExp(pattern) {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                           .replace(/\*/g, '.*')
+                           .replace(/\?/g, '.');
+    return new RegExp(`^${escaped}$`);
+}
+
+function matchesPattern(name, pattern) {
+    if (!pattern || pattern === '*') return true;
+    return globToRegExp(pattern).test(name);
+}
+
 app.get('/api/v2/conans/search', async (req, res) => {
+    try {
+        const q = req.query.q;
+        let namePattern = '*';
+        let versionPattern = '*';
+        if (typeof q === 'string' && q.length > 0) {
+            const parts = q.split('/');
+            namePattern = parts[0] || '*';
+            versionPattern = parts[1] || '*';
+        }
+        console.log(`search: name=${namePattern} version=${versionPattern}`);
 
-    const q = req.query.q;
-    const [recipe_name, version] = typeof q === 'string' ? q.split('/') : [];
-    console.log(`recipe_name: ${recipe_name}`);
-    console.log(`version: ${version}`);
+        const recipes = await getGithubLocalDirContentJustDirsMemoized('');
+        const results = [];
+        if (recipes) {
+            for (const name of Object.keys(recipes)) {
+                if (name.startsWith('.')) continue;
+                if (!matchesPattern(name, namePattern)) continue;
+                const versions = await getGithubLocalDirContentJustDirsMemoized(name);
+                if (!versions) continue;
+                for (const version of Object.keys(versions)) {
+                    if (!matchesPattern(version, versionPattern)) continue;
+                    results.push(`${name}/${version}@_/_`);
+                }
+            }
+        }
 
-    const json = {
-        "results": []
-    };
-
-    writeCommonHeaders(res);
-    res.set('Content-Type', 'application/json');
-    res.status(200).send(json);
+        writeCommonHeaders(res);
+        res.set('Content-Type', 'application/json');
+        res.status(200).send({ results });
+    } catch (err) {
+        console.error(`[search] error: ${err && err.stack ? err.stack : err}`);
+        res.status(500).send();
+    }
 });
 
 // PUT endpoints ---------------------------------------------------------------
