@@ -228,16 +228,18 @@ async function readBinaryFile(filePath) {
     return uint8Array;
 }
 
+function resolveInRepo(relativePath) {
+    const root = path.resolve(process.env.GIT_REPO_DIR || '');
+    const fullPath = path.resolve(root, relativePath);
+    if (fullPath !== root && !fullPath.startsWith(root + path.sep)) {
+        return null;
+    }
+    return fullPath;
+}
+
 async function getGithubLocalFileContent(relativePath) {
-    // console.log(`getGithubLocalFileContent: ${relativePath}`);
-    // console.log(`TypeOf relativePath: ${typeof relativePath}`);
-
-    // const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
-    // console.log(`fullPath: ${fullPath}`);
-
-    const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
-    // console.log(`fullPath: ${fullPath}`);
-    if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+    const fullPath = resolveInRepo(relativePath);
+    if (fullPath === null) {
         console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
@@ -257,13 +259,8 @@ async function getGithubLocalFileContent(relativePath) {
 }
 
 async function getGithubLocalDirContent(relativePath) {
-    // console.log(`getGithubLocalDirContent: ${relativePath}`);
-    // const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
-    // console.log(`fullPath: ${fullPath}`);
-
-    const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
-    // console.log(`fullPath: ${fullPath}`);
-    if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+    const fullPath = resolveInRepo(relativePath);
+    if (fullPath === null) {
         console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
@@ -283,14 +280,8 @@ async function getGithubLocalDirContent(relativePath) {
 }
 
 async function getGithubLocalDirContentJustDirs(relativePath) {
-    // console.log(`getGithubLocalDirContentJustDirs: ${relativePath}`);
-    // const fullPath = path.join(process.env.GIT_REPO_DIR, relativePath);
-    // console.log(`fullPath: ${fullPath}`);
-
-
-    const fullPath = path.resolve(process.env.GIT_REPO_DIR, relativePath);
-    // console.log(`fullPath: ${fullPath}`);
-    if ( ! fullPath.startsWith(process.env.GIT_REPO_DIR)) {
+    const fullPath = resolveInRepo(relativePath);
+    if (fullPath === null) {
         console.log(`... not in GIT_REPO_DIR`);
         return undefined;
     }
