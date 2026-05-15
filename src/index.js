@@ -559,7 +559,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 app.get('/api/v2/conans/search', async (req, res) => {
 
     const q = req.query.q;
-    const [recipe_name, version] = q.split('/');
+    const [recipe_name, version] = typeof q === 'string' ? q.split('/') : [];
     console.log(`recipe_name: ${recipe_name}`);
     console.log(`version: ${version}`);
 
