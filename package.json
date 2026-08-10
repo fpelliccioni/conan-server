@@ -12,7 +12,8 @@
     "devts": "./node_modules/typescript/bin/tsc && nodemon src/index.js",
     "startts": "./node_modules/typescript/bin/tsc && node ./dist/src/index.js",
     "devgithub": "./node_modules/typescript/bin/tsc && node ./dist/src/github/github.mjs",
-    "build-dist": "./node_modules/typescript/bin/tsc"
+    "build-dist": "./node_modules/typescript/bin/tsc",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@octokit/rest": "16.25.0",

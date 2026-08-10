@@ -6,6 +6,7 @@ import {encode, decode, labels} from 'windows-1252';
 import getRawBody from 'raw-body';
 import typeis from 'type-is';
 import { uploadToRepo } from './github.js';
+import { publishStaging, redact } from './publish.js';
 import crypto from 'crypto';
 import NodeCache from 'node-cache';
 import memoize from 'memoizee';
@@ -629,12 +630,15 @@ function getCommitMessage(recipe_name, version, revision) {
     return commitMessage;
 }
 
-function cleanUpTmpDir(tmpDir) {
-    fs.rm(tmpDir, { recursive: true, force: true }, (err) => {
-        if (err) {
-            console.log(err);
-        }
-    });
+// Awaitable, and it throws.
+//
+// The callback form returned before the removal had happened and reported a
+// failure to nobody but the console, so the caller could announce that the
+// staging was gone while the directory was still there — or still there and
+// undeletable. The one thing this function exists to report is whether the
+// bytes are still on disk, and the callback form could not report it.
+async function cleanUpTmpDir(tmpDir) {
+    await fsPro.rm(tmpDir, { recursive: true, force: true });
 }
 
 function verifyFileContent(fileContent, checkSumSha1) {
@@ -648,13 +652,6 @@ function verifyFileContent(fileContent, checkSumSha1) {
     return true;
 }
 
-async function nonThrowingUploadToRepo(token, uploadPath, owner, repo, branch, commitMessage) {
-    try {
-        await uploadToRepo(token, uploadPath, owner, repo, branch, commitMessage)
-    } catch (err) {
-        console.error(`Error uploading to repo: ${err}`);
-    }
-}
 
 function justWriteFile(res, fileContent, filePath) {
     fs.writeFile(filePath, fileContent, async (err) => {
@@ -844,32 +841,25 @@ app.listen(app.get('port'),()=>{
 const myCache = new NodeCache( { stdTTL: expirationTime, checkperiod: 2 } )
 
 myCache.on("expired", async function(key, value){
+    const { token, owner, repo, branch, recipe_name, version, tmpDir, revision } = value;
     try {
-        console.log(`${key} Cache Expired, uploading to repo...`);
+        console.log(`[expired] publishing ${recipe_name}/${version}#${revision} to ${owner}/${repo}@${branch} from ${tmpDir}`);
 
-        const { token, owner, repo, branch, recipe_name, version, tmpDir, revision } = value;
-
-        console.log(`owner: ${owner}`);
-        console.log(`repo: ${repo}`);
-        console.log(`branch: ${branch}`);
-        console.log(`recipe_name: ${recipe_name}`);
-        console.log(`version: ${version}`);
-        console.log(`revision: ${revision}`);
-        console.log(`tmpDir: ${tmpDir}`);
-
-        const uploadPath = getUploadPath(tmpDir, owner, repo, branch);
-
-        const commitMessage = getCommitMessage(recipe_name, version, revision);
-        await nonThrowingUploadToRepo(token, uploadPath, owner, repo, branch, commitMessage);
-
-        try {
-            await performGithubPull();
-        } catch (pullErr) {
-            console.error(`[expired] performGithubPull failed: ${pullErr && pullErr.stack ? pullErr.stack : pullErr}`);
-        }
-
-        cleanUpTmpDir(tmpDir);
+        await publishStaging({
+            uploadToRepo,
+            performGithubPull,
+            removeStaging: cleanUpTmpDir,
+            log: { info: (m) => console.log(m), error: (m) => console.error(m) },
+        }, {
+            token, owner, repo, branch, recipe_name, version, revision, tmpDir,
+            uploadPath: getUploadPath(tmpDir, owner, repo, branch),
+            commitMessage: getCommitMessage(recipe_name, version, revision),
+        });
     } catch (err) {
-        console.error(`[expired] handler failed for key ${key}: ${err && err.stack ? err.stack : err}`);
+        // Whatever went wrong, it was not the publish deciding to delete: this
+        // path never removes the staging, so an unforeseen failure leaves the
+        // upload on disk rather than taking it with it.
+        console.error(`[expired] handler failed for ${recipe_name}/${version}#${revision}: ${redact(err, token)}`);
+        console.error(`[expired] staging kept at ${tmpDir}`);
     }
 });
