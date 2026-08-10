@@ -16,6 +16,8 @@
 // Here the deletion is earned. It happens when the commit is on GitHub and the
 // local clone has it, and at no other time. Every other path keeps the bytes.
 
+import { redactSecret, messageOf } from './redact.js';
+
 export const PUBLISHED = 'published';
 export const KEPT = 'kept';
 
@@ -30,7 +32,7 @@ export const KEPT = 'kept';
  * @param {object} deps
  *   uploadToRepo(token, uploadPath, owner, repo, branch, message) -> Promise
  *   performGithubPull() -> Promise
- *   removeStaging(tmpDir) -> void
+ *   removeStaging(tmpDir) -> Promise    rejects if the directory cannot be removed
  *   log      { info(msg), error(msg) }
  * @param {object} entry  the cache entry: token, owner, repo, branch,
  *                        recipe_name, version, revision, tmpDir, uploadPath,
@@ -78,7 +80,7 @@ export async function publishStaging(deps, entry) {
         // left behind, and saying so is what stops it being mistaken for one of
         // the failures above.
         log.error(`[publish] ${what} published, but its staging could not be removed`);
-        log.error(`[publish] ${redact(err, token)}`);
+        log.error(`[publish] ${redactSecret(messageOf(err), token)}`);
         log.error(`[publish] staging left at ${tmpDir} — the package is published; this directory is only leftover`);
         return { outcome: PUBLISHED, stage: 'kept', reason: 'the staging could not be removed' };
     }
@@ -89,7 +91,7 @@ export async function publishStaging(deps, entry) {
 
 function keep(log, what, tmpDir, reason, err, token) {
     log.error(`[publish] ${what} NOT published: ${reason}`);
-    log.error(`[publish] ${redact(err, token)}`);
+    log.error(`[publish] ${redactSecret(messageOf(err), token)}`);
     log.error(`[publish] staging kept at ${tmpDir} — the upload is still on disk and nothing has been lost`);
     return { outcome: KEPT, stage: 'kept', reason };
 }
@@ -97,35 +99,4 @@ function keep(log, what, tmpDir, reason, err, token) {
 function describe(entry) {
     const { recipe_name, version, revision } = entry;
     return `${recipe_name}/${version}#${revision}`;
-}
-
-/**
- * An error as a single line, with the credential removed.
- *
- * The token is a GitHub PAT supplied by the client, and Octokit puts the failing
- * request in its error message. A log that quotes it verbatim turns every push
- * failure into a credential leak — into a file, a terminal, or a paste in a bug
- * report.
- *
- * The exact value is what gets removed, because the exact value is what we have.
- * Pattern matching alone cannot do this job: legacy PATs are forty hex
- * characters and so are git commit SHAs, so a rule broad enough to catch the
- * first would strip the second out of every message it appears in — and the SHA
- * is often the most useful thing in the line. The patterns stay as a backstop
- * for a token that is not this request's, never as the primary defence.
- *
- * Stacks are not logged: the message and the reference identify the failure,
- * and the stack only adds paths.
- */
-export function redact(err, secret) {
-    let text = err && err.message ? err.message : String(err);
-
-    if (typeof secret === 'string' && secret.length >= 8) {
-        text = text.split(secret).join('[redacted-token]');
-    }
-
-    return text
-        .replace(/gh[pousr]_[A-Za-z0-9]{16,}/g, '[redacted-token]')
-        .replace(/github_pat_[A-Za-z0-9_]{20,}/g, '[redacted-token]')
-        .replace(/(authorization|bearer)(["'\s:=]+)\S+/gi, '$1$2[redacted]');
 }

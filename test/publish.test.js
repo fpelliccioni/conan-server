@@ -15,7 +15,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { publishStaging, redact, PUBLISHED, KEPT } from '../src/publish.js';
+import { publishStaging, PUBLISHED, KEPT } from '../src/publish.js';
+import { redactSecret, messageOf } from '../src/redact.js';
+
+// The two PRs each grew their own copy of this; they are one helper now, and
+// these cases follow it rather than being dropped.
+const redact = (err, secret) => redactSecret(messageOf(err), secret);
 
 const TOKEN = 'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 

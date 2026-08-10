@@ -6,7 +6,9 @@ import {encode, decode, labels} from 'windows-1252';
 import getRawBody from 'raw-body';
 import typeis from 'type-is';
 import { uploadToRepo } from './github.js';
-import { publishStaging, redact } from './publish.js';
+import { publishStaging } from './publish.js';
+import { createWriteGuard, credentialFrom } from './credentials.js';
+import { redactSecret, messageOf } from './redact.js';
 import crypto from 'crypto';
 import NodeCache from 'node-cache';
 import memoize from 'memoizee';
@@ -137,23 +139,25 @@ app.get('/api/v1/ping', (req, res) => {
     res.status(200).send();
 });
 
-app.get('/api/v2/users/authenticate', (req, res) => {
-    const auth = req.header('Authorization');
-    const { username, password } = getAuth(auth);
+// Every path that writes goes through this, and so does the login.
+const requireWriteCredential = createWriteGuard({ writeCommonHeaders });
 
-    // console.log(`auth:     ${auth}`);
-    // console.log(`username: ${username}`);
-    // console.log(`password: ${password}`);
+app.get('/api/v2/users/authenticate', async (req, res) => {
+    const secret = await requireWriteCredential(req, res);
+    if ( ! secret) return;
 
-
-    const requestBody = req.body;
     writeCommonHeaders(res);
-    res.status(200).send(password);
+    // The Conan token is the credential itself: this server has no tokens of its
+    // own, and reuses whatever the client supplied to push to GitHub. Handing it
+    // back is what the protocol expects here, and is unchanged — what changed is
+    // that we no longer hand back a string we have never checked.
+    res.status(200).send(secret);
 });
 
-app.get('/api/v2/users/check_credentials', (req, res) => {
-    const auth = req.header('Authorization');
-    const { username, password } = getAuth(auth);
+app.get('/api/v2/users/check_credentials', async (req, res) => {
+    const secret = await requireWriteCredential(req, res);
+    if ( ! secret) return;
+
     writeCommonHeaders(res);
     res.status(200).send();
 });
@@ -725,6 +729,8 @@ function getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision,
 }
 
 app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
+    if ( ! await requireWriteCredential(req, res)) return;
+
     const auth = req.header('Authorization');
     const checksumDeploy = req.header('X-Checksum-Deploy');
     const checksumSha1 = req.header('X-Checksum-Sha1');
@@ -775,6 +781,8 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
 });
 
 app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
+    if ( ! await requireWriteCredential(req, res)) return;
+
     const auth = req.header('Authorization');
     const checksumDeploy = req.header('X-Checksum-Deploy');
     const checksumSha1 = req.header('X-Checksum-Sha1');
@@ -834,6 +842,29 @@ try {
 // ----------------------------------------------------------------------------------------------------------------------------
 
 
+// Express's default handler puts the stack in the response body unless
+// NODE_ENV is production, and this server is public: an anonymous GET of
+// check_credentials was returning 1337 bytes of absolute paths, module layout
+// and the username the process runs as. The detail belongs in the log, where
+// the operator can see it, and nowhere else.
+//
+// Registered last, after every route, because Express picks error handlers in
+// declaration order.
+app.use((err, req, res, next) => {
+    // The stack is redacted before it is logged, and the error object is never
+    // logged whole. An error thrown out of a request carries whatever the
+    // library that threw it attached, and for an HTTP client that is routinely
+    // the request it failed on — headers included. `${err.stack}` reads as if it
+    // could only contain frames; a rejected Octokit request puts the
+    // Authorization header into the message it builds.
+    const secret = credentialFrom(req.header('Authorization'));
+    const detail = err && err.stack ? err.stack : String(err);
+    console.error(`[error] ${req.method} ${req.path}: ${redactSecret(detail, secret)}`);
+
+    if (res.headersSent) return next(err);
+    res.status(500).json({ errors: [{ status: 500, message: 'Internal server error.' }] });
+});
+
 app.listen(app.get('port'),()=>{
     console.log(`Server listening on port ${app.get('port')}`);
 });
@@ -859,7 +890,7 @@ myCache.on("expired", async function(key, value){
         // Whatever went wrong, it was not the publish deciding to delete: this
         // path never removes the staging, so an unforeseen failure leaves the
         // upload on disk rather than taking it with it.
-        console.error(`[expired] handler failed for ${recipe_name}/${version}#${revision}: ${redact(err, token)}`);
+        console.error(`[expired] handler failed for ${recipe_name}/${version}#${revision}: ${redactSecret(messageOf(err), token)}`);
         console.error(`[expired] staging kept at ${tmpDir}`);
     }
 });
