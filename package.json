@@ -13,7 +13,7 @@
     "startts": "./node_modules/typescript/bin/tsc && node ./dist/src/index.js",
     "devgithub": "./node_modules/typescript/bin/tsc && node ./dist/src/github/github.mjs",
     "build-dist": "./node_modules/typescript/bin/tsc",
-    "test": "node --test test/*.test.js"
+    "test": "node --experimental-test-module-mocks --test test/*.test.js"
   },
   "dependencies": {
     "@octokit/rest": "16.25.0",
