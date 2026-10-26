@@ -1,249 +1,78 @@
 import dotenv from 'dotenv';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, mkdir, readdir, copyFile, chmod, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { redactSecret } from './redact.js';
+
 dotenv.config();
+const exec = promisify(execFile);
 
-import fs from 'fs';
-import Octokit from '@octokit/rest';
-import path from 'path';
-import pkg from 'fs-extra';
-const { readFile } = pkg;
-
-import {globby} from 'globby';
-// import { http, https } from 'follow-redirects';
-import pkg2 from 'follow-redirects';
-const { http, https } = pkg2;
-
-export const uploadToRepo = async (personalAccessToken, coursePath, org, repo, branch, commitMessage) => {
-  const octo = new Octokit({
-    auth: personalAccessToken,
-  })
-
-  // console.log(`coursePath: ${coursePath}`)
-  // console.log(`org:        ${org}`)
-  // console.log(`repo:       ${repo}`)
-  // console.log(`branch:     ${branch}`)
-  // console.log(`personalAccessToken: ${personalAccessToken}`)
-
-  await uploadToRepoInternal(octo, coursePath, org, repo, branch, commitMessage)
+// GitHub's JSON blob endpoint rejects large base64 requests before the normal
+// Git file-size limit. Send a Git pack instead, without touching the read clone.
+// A competing publication is never overwritten: a non-fast-forward push fails
+// and publishStaging retains the upload for an explicit retry.
+export async function uploadToRepo(token, uploadPath, owner, repo, branch, message, options = {}) {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) {
+        throw new Error('Invalid GitHub repository');
+    }
+    const work = await mkdtemp(path.join(tmpdir(), 'conan-publish-'));
+    const checkout = path.join(work, 'checkout');
+    const askpass = path.join(work, 'askpass');
+    const repositoryVariables = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+        'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR',
+        'GIT_PREFIX', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT'];
+    const inherited = Object.fromEntries(Object.entries(process.env)
+        .filter(([key]) => !repositoryVariables.includes(key)));
+    const env = { ...inherited, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass,
+        CONAN_GIT_TOKEN: token, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+    // Credentials travel through the child environment, never the URL or argv.
+    const git = async (...args) => (await exec('git', args, {
+        cwd: checkout, env, timeout: 300_000, maxBuffer: 1024 * 1024,
+    })).stdout.trim();
+    try {
+        await mkdir(checkout);
+        await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" x-access-token ;; *) printf "%s\\n" "$CONAN_GIT_TOKEN" ;; esac\n', { mode: 0o700 });
+        await git('check-ref-format', `refs/heads/${branch}`);
+        await git('init');
+        await git('remote', 'add', 'origin', options.remoteUrl ?? `https://github.com/${owner}/${repo}.git`);
+        await git('-c', 'credential.helper=', 'fetch', '--depth=1', 'origin', `refs/heads/${branch}`);
+        await git('checkout', '--detach', 'FETCH_HEAD');
+        await copyUpload(uploadPath, checkout);
+        await git('add', '--all', '--force', '--', '.');
+        try {
+            await git('diff', '--cached', '--quiet');
+            return; // Identical retry: the remote already contains this upload.
+        } catch (err) {
+            if (err.code !== 1) throw err;
+        }
+        await git('-c', 'user.name=Conan package publisher', '-c', 'user.email=packages@kth.cash',
+            '-c', 'commit.gpgsign=false', 'commit', '-m', message);
+        await git('-c', 'credential.helper=', 'push', 'origin', `HEAD:refs/heads/${branch}`);
+    } catch (err) {
+        // execFile errors contain argv and stderr. Expose only a redacted message.
+        throw new Error(redactSecret(err.message, token));
+    } finally {
+        await rm(work, { recursive: true, force: true });
+    }
 }
 
-const uploadToRepoInternal = async (octo, coursePath, org, repo, branch, commitMessage) => {
-  // gets commit's AND its tree's SHA
-  const currentCommit = await getCurrentCommit(octo, org, repo, branch)
-  // console.log(`currentCommit: ${JSON.stringify(currentCommit)}`)
-
-  const filesPaths = await globby(coursePath)
-  const filesBlobs = await Promise.all(filesPaths.map(createBlobForFile(octo, org, repo)))
-
-  const pathsForBlobs = filesPaths.map(fullPath => path.relative(coursePath, fullPath))
-
-  // console.log(`currentCommit: ${JSON.stringify(currentCommit)}`)
-  // console.log(`filesPaths:    ${filesPaths}`)
-  // console.log(`filesBlobs:    ${filesBlobs}`)
-  // console.log(`pathsForBlobs: ${pathsForBlobs}`)
-
-  const newTree = await createNewTree(
-    octo,
-    org,
-    repo,
-    filesBlobs,
-    pathsForBlobs,
-    currentCommit.treeSha
-  )
-
-  // console.log(`newTree:       ${newTree}`)
-
-  const newCommit = await createNewCommit(
-    octo,
-    org,
-    repo,
-    commitMessage,
-    newTree.sha,
-    currentCommit.commitSha
-  )
-  // console.log(`newCommit:     ${newCommit}`)
-
-  await setBranchToCommit(octo, org, repo, branch, newCommit.sha)
+async function copyUpload(source, destination) {
+    for (const entry of await readdir(source, { withFileTypes: true })) {
+        if (entry.name.toLowerCase() === '.git' || entry.isSymbolicLink()) {
+            throw new Error('Upload contains a reserved path or symbolic link');
+        }
+        const from = path.join(source, entry.name);
+        const to = path.join(destination, entry.name);
+        if (entry.isDirectory()) {
+            await mkdir(to, { recursive: true });
+            await copyUpload(from, to);
+        } else if (entry.isFile()) {
+            await copyFile(from, to);
+            await chmod(to, 0o644);
+        } else {
+            throw new Error('Upload contains an unsupported file');
+        }
+    }
 }
-
-const getCurrentCommit = async (
-  octo,
-  org,
-  repo,
-  branch = 'master'
-) => {
-  const { data: refData } = await octo.git.getRef({
-    owner: org,
-    repo,
-    ref: `heads/${branch}`,
-  })
-  const commitSha = refData.object.sha
-  const { data: commitData } = await octo.git.getCommit({
-    owner: org,
-    repo,
-    commit_sha: commitSha,
-  })
-  return {
-    commitSha,
-    treeSha: commitData.tree.sha,
-  }
-}
-
-// Notice that readFile's utf8 is typed differently from Github's utf-8
-const getFileAsUTF8 = (filePath) => readFile(filePath, 'utf8')
-const getFileAsBase64 = (filePath) => {
-  return readFile(filePath, 'base64')
-}
-
-const getFileSmart = (filePath) => {
-  const extension = path.extname(filePath)
-  if (extension === '.tgz') {
-    return getFileAsBase64(filePath)
-  }
-
-  return getFileAsUTF8(filePath)
-}
-
-const getEncoding = (filePath) => {
-  const extension = path.extname(filePath)
-  if (extension === '.tgz') {
-    return 'base64';
-  }
-
-  return 'utf-8'
-}
-
-const createBlobForFile = (octo, org, repo) => async (
-  filePath
-) => {
-  // const content = await getFileAsUTF8(filePath)
-  // const blobData = await octo.git.createBlob({
-  //   owner: org,
-  //   repo,
-  //   content,
-  //   encoding: 'utf-8',
-  // })
-  // return blobData.data
-
-  const content = await getFileSmart(filePath)
-  const blobData = await octo.git.createBlob({
-    owner: org,
-    repo,
-    content,
-    encoding: getEncoding(filePath),
-  })
-
-  // console.log(`filePath: ${filePath}`)
-  // console.log(`content: ${content}`)
-  // console.log(`blobData: ${JSON.stringify(blobData)}`)
-
-  return blobData.data
-
-}
-
-const createNewTree = async (
-  octo,
-  owner,
-  repo,
-  blobs,
-  paths,
-  parentTreeSha
-) => {
-  // My custom config. Could be taken as parameters
-  const tree = blobs.map(({ sha }, index) => ({
-    path: paths[index],
-    mode: `100644`,
-    type: `blob`,
-    sha,
-  }))
-  const { data } = await octo.git.createTree({
-    owner,
-    repo,
-    tree,
-    base_tree: parentTreeSha,
-  })
-  return data
-}
-
-const createNewCommit = async (
-  octo,
-  org,
-  repo,
-  message,
-  currentTreeSha,
-  currentCommitSha
-) =>
-  (await octo.git.createCommit({
-    owner: org,
-    repo,
-    message,
-    tree: currentTreeSha,
-    parents: [currentCommitSha],
-  })).data
-
-const setBranchToCommit = async (
-  octo,
-  org,
-  repo,
-  branch,
-  commitSha
-) => {
-  await octo.git.updateRef({
-      owner: org,
-      repo,
-      ref: `heads/${branch}`,
-      sha: commitSha,
-  })
-}
-
-// const main = async () => {
-//   const ORGANIZATION = `k-nuth`
-//   const REPO = `conan-packages`
-//   const BRANCH = `master`
-
-//   // await uploadToRepo(octo, `./files-to-upload/c.dir/c.txt`, ORGANIZATION, REPO)
-//   // await uploadToRepo(process.env.PERSONAL_ACESSS_TOKEN, `./files-to-upload/`, ORGANIZATION, REPO, BRANCH)
-
-//   // await uploadToRepo(process.env.PERSONAL_ACESSS_TOKEN, `./files-to-upload/d.txt`, ORGANIZATION, REPO, BRANCH)
-//   await uploadToRepo(process.env.PERSONAL_ACESSS_TOKEN, `./files-to-upload/`, ORGANIZATION, REPO, BRANCH)
-// }
-
-// main()
-
-// const createRepo = async (octo, org, name) => {
-//   await octo.repos.createInOrg({ org, name, auto_init: true })
-// }
-
-
-
-
-// const main = async () => {
-//   // console.log(`process.env.PERSONAL_ACESSS_TOKEN: ${process.env.PERSONAL_ACESSS_TOKEN}`)
-
-//   // There are other ways to authenticate, check https://developer.github.com/v3/#authentication
-//   const octo = new Octokit({
-//     auth: process.env.PERSONAL_ACESSS_TOKEN,
-//   })
-
-//   // https://github.com/k-nuth/conan-packages
-
-//   // For this, I was working on a organization repos, but it works for common repos also (replace org for owner)
-//   const ORGANIZATION = `k-nuth`
-//   const REPO = `conan-packages`
-//   const repos = await octo.repos.listForOrg({
-//     org: ORGANIZATION,
-//   })
-//   // if (!repos.data.map((repo: Octokit.ReposListForOrgResponseItem) => repo.name).includes(REPO)) {
-//   //   await createRepo(octo, ORGANIZATION, REPO)
-//   // }
-//   /**
-//    * my-local-folder has files on its root, and subdirectories with files
-//    */
-//   // await uploadToRepo(octo, `./files-to-upload/c.dir/c.txt`, ORGANIZATION, REPO)
-//   await uploadToRepo(octo, `./files-to-upload/`, ORGANIZATION, REPO)
-// }
-
-
-
-// module.exports = {
-//   uploadToRepo,
-// }

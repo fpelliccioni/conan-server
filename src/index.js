@@ -465,6 +465,40 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions', async (req, res) =
     res.status(200).send(json);
 });
 
+app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/search', async (req, res, next) => {
+    try {
+        const { recipe_name, version, revision } = req.params;
+        const base = `${recipe_name}/${version}/${revision}`;
+        const directories = await getGithubLocalDirContentJustDirsMemoized(base);
+        if (!directories) return res.status(404).send();
+        const packages = await getGithubLocalDirContentJustDirsMemoized(`${base}/packages`);
+        const results = Object.create(null);
+        for (const id of Object.keys(packages ?? {})) {
+            const packagePath = `${base}/packages/${id}`;
+            const latest = await getGithubLocalFileContentMemoized(`${packagePath}/latest.json`);
+            if (!latest) continue;
+            let prev;
+            try {
+                prev = JSON.parse(latest)?.revision;
+            } catch {
+                console.error(`[search] ignoring invalid latest metadata for ${id}`);
+                continue;
+            }
+            if (typeof prev !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(prev)) {
+                console.error(`[search] ignoring invalid package revision for ${id}`);
+                continue;
+            }
+            const info = await getGithubLocalFileContentMemoized(`${packagePath}/${prev}/conaninfo.txt`);
+            if (!info) continue;
+            results[id] = req.query.list_only === 'True' ? {} : { content: info.toString() };
+        }
+        writeCommonHeaders(res);
+        res.status(200).json(results);
+    } catch (err) {
+        next(err);
+    }
+});
+
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/latest', async (req, res) => {
     const { recipe_name, version, revision, package_id } = req.params;
     // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
