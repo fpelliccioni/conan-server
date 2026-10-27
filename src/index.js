@@ -367,7 +367,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
 
     // const latest = await getGithubRemoteFileContentMemoized(owner, repo, branch, path, token)
     const latest = await getGithubLocalFileContentMemoized(path)
-    if ( ! latest) {
+    if (latest === undefined) {
         res.status(404).send();
         return;
     }
@@ -552,7 +552,7 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:
 
     // const latest = await getGithubRemoteFileContentMemoized(owner, repo, branch, path, token)
     const latest = await getGithubLocalFileContentMemoized(path)
-    if ( ! latest) {
+    if (latest === undefined) {
         res.status(404).send();
         return;
     }

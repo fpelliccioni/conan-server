@@ -76,4 +76,22 @@ test('Conan binary search exposes published package metadata over HTTP', { timeo
     assert.equal(empty.status, 200);
     assert.deepEqual(await empty.json(), {});
     assert.equal((await fetch(url.replace('sample', 'absent'))).status, 404);
+    // Header-only recipes can legitimately publish a zero-byte conaninfo.txt.
+    // Exercise the real download routes: empty bytes are not a missing file.
+    const emptyRevision = path.join(root, 'header-only/1.0/rrev');
+    const emptyPackage = path.join(emptyRevision, 'packages', pid, 'prev');
+    await mkdir(emptyPackage, { recursive: true });
+    await writeFile(path.join(emptyRevision, 'empty.txt'), '');
+    await writeFile(path.join(emptyPackage, 'conaninfo.txt'), '');
+    const filesUrl = url.replace('sample', 'header-only').replace('/search', '/files');
+    const recipeFile = await fetch(`${filesUrl}/empty.txt`);
+    assert.equal(recipeFile.status, 200);
+    assert.equal((await recipeFile.arrayBuffer()).byteLength, 0);
+    const packageUrl = filesUrl.replace('/files', `/packages/${pid}/revisions/prev/files`);
+    const infoFile = await fetch(`${packageUrl}/conaninfo.txt`);
+    assert.equal(infoFile.status, 200);
+    assert.equal((await infoFile.arrayBuffer()).byteLength, 0);
+    assert.equal((await fetch(`${filesUrl}/absent.txt`)).status, 404);
+    assert.equal((await fetch(`${packageUrl}/absent.txt`)).status, 404);
+
 });
