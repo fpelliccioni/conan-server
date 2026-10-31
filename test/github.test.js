@@ -159,3 +159,118 @@ test('an inherited repository environment does not redirect the publication', as
     assert.equal(await git(f.seed, 'rev-parse', 'HEAD'), before);
     assert.equal(await git(f.root, '--git-dir', f.remote, 'show', 'master:metadata.txt'), 'isolated publication');
 });
+
+// Serve the actual Git smart-HTTP protocol and count the fetch response bytes.
+// Reusing a warm read clone must avoid downloading its unrelated binary blobs.
+async function gitHttp(t, root) {
+    const { spawn } = await import('node:child_process');
+    let fetched = 0;
+    const children = new Set();
+    const server = http.createServer((req, res) => {
+        const url = new URL(req.url, 'http://localhost');
+        const child = spawn('git', ['http-backend'], { env: { ...gitEnv,
+            GIT_PROJECT_ROOT: root, GIT_HTTP_EXPORT_ALL: '1',
+            REQUEST_METHOD: req.method, PATH_INFO: url.pathname,
+            QUERY_STRING: url.search.slice(1), CONTENT_TYPE: req.headers['content-type'] || '',
+            REMOTE_ADDR: '127.0.0.1', REMOTE_USER: 'fixture', CONTENT_LENGTH: req.headers['content-length'] || '',
+        }, stdio: ['pipe', 'pipe', 'pipe'] });
+        children.add(child);
+        let headers = Buffer.alloc(0), sent = false;
+        child.stdout.on('data', chunk => {
+            if (!sent) {
+                headers = Buffer.concat([headers, chunk]);
+                const split = headers.indexOf('\r\n\r\n');
+                if (split < 0) return;
+                for (const line of headers.subarray(0, split).toString().split('\r\n')) {
+                    const at = line.indexOf(':');
+                    if (at < 0) continue;
+                    const key = line.slice(0, at), value = line.slice(at + 1).trim();
+                    if (key.toLowerCase() === 'status') res.statusCode = Number(value.split(' ')[0]);
+                    else res.setHeader(key, value);
+                }
+                chunk = headers.subarray(split + 4); sent = true;
+            }
+            if (url.pathname.endsWith('/git-upload-pack')) fetched += chunk.length;
+            res.write(chunk);
+        });
+        child.on('close', () => { children.delete(child); res.end(); });
+        child.stderr.resume(); req.pipe(child.stdin);
+    });
+    server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    t.after(async () => {
+        for (const child of children) child.kill('SIGKILL');
+        server.closeAllConnections();
+        await new Promise(resolve => server.close(resolve));
+    });
+    return { url: `http://127.0.0.1:${server.address().port}/remote.git`, bytes: () => fetched };
+}
+
+test('a warm read clone prevents downloading unrelated package blobs', async t => {
+    const f = await fixture(t);
+    const { randomBytes } = await import('node:crypto');
+    await writeFile(path.join(f.seed, 'large-unrelated.tgz'), randomBytes(2 * 1024 * 1024));
+    await git(f.seed, 'add', 'large-unrelated.tgz');
+    await git(f.seed, 'commit', '-m', 'Existing binary package');
+    await git(f.seed, 'push', f.remote, 'master');
+    const before = await git(f.seed, 'rev-parse', 'HEAD');
+    const parallel = path.join(f.root, 'parallel');
+    await git(f.root, 'clone', f.remote, parallel);
+    await writeFile(path.join(parallel, 'remote-only.txt'), 'another publisher');
+    await git(parallel, 'add', 'remote-only.txt');
+    await git(parallel, 'commit', '-m', 'Advance remote beyond the read cache');
+    await git(parallel, 'push', f.remote, 'master');
+    const server = await gitHttp(t, f.root);
+    await writeFile(path.join(f.stage, 'new-metadata.txt'), 'new revision');
+    await uploadToRepo('not-a-real-token', f.stage, 'k-nuth', 'conan-packages',
+        'master', 'Publish incrementally', { remoteUrl: server.url, objectSource: f.seed });
+    t.diagnostic(`Incremental fetch transferred ${server.bytes()} bytes for a repository containing a 2 MiB binary`);
+    assert.equal(await git(f.root, '--git-dir', f.remote, 'show', 'master:remote-only.txt'), 'another publisher');
+    assert.ok(server.bytes() < 32 * 1024, `downloaded ${server.bytes()} bytes from the warm remote`);
+    assert.equal(await git(f.seed, 'rev-parse', 'HEAD'), before, 'the read clone must not be checked out or committed by the writer');
+    assert.equal(await git(f.seed, 'status', '--porcelain'), '');
+    assert.equal(await git(f.root, '--git-dir', f.remote, 'show', 'master:new-metadata.txt'), 'new revision');
+});
+
+test('a timed-out publication kills descendants before removing its checkout', async t => {
+    if (process.platform === 'win32') return t.skip('production publisher uses POSIX process groups');
+    const f = await fixture(t);
+    const { chmod } = await import('node:fs/promises');
+    const realGit = (await exec('which', ['git'])).stdout.trim();
+    const bin = path.join(f.root, 'bin'); await mkdir(bin);
+    const pidFile = path.join(f.root, 'descendant.pid');
+    const wrapper = `#!${process.execPath}\n` + `
+const { spawn, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+if (!process.argv.slice(2).includes('fetch')) {
+ const r = spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), {stdio:'inherit'}); process.exit(r.status ?? 1);
+}
+const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});console.log('ready');setInterval(()=>{},1000)"], {stdio:['ignore','pipe','inherit']});
+child.stdout.once('data',()=>fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)));
+setInterval(()=>{},1000);
+`;
+    await writeFile(path.join(bin, 'git'), wrapper); await chmod(path.join(bin, 'git'), 0o700);
+    const previous = process.env.PATH; process.env.PATH = `${bin}${path.delimiter}${previous}`;
+    let rescued = false;
+    const { readFileSync } = await import('node:fs');
+    const alive = pid => {
+        try {
+            // A zombie holds no descriptors; only its parent/init can reap it.
+            if (process.platform === 'linux' && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ')[0] === 'Z') return false;
+            process.kill(pid, 0); return true;
+        } catch { return false; }
+    };
+    const rescue = setTimeout(() => {
+        rescued = true;
+        try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL'); } catch {}
+    }, 6000);
+    try {
+        await assert.rejects(uploadToRepo('not-a-real-token', f.stage, 'k-nuth', 'conan-packages',
+            'master', 'Timeout control', { remoteUrl: f.remote, timeoutMs: 2000, killGraceMs: 100 }));
+        const pid = Number(await readFile(pidFile, 'utf8'));
+        assert.equal(rescued, false, 'test cleanup had to rescue a leaked descendant');
+        assert.equal(alive(pid), false, 'timed-out Git descendant remains alive');
+    } finally {
+        clearTimeout(rescue); process.env.PATH = previous;
+        try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL'); } catch {}
+    }
+});
