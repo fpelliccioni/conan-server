@@ -100,3 +100,41 @@ function describe(entry) {
     const { recipe_name, version, revision } = entry;
     return `${recipe_name}/${version}#${revision}`;
 }
+
+// One owner serializes the write/push/read-clone-refresh transaction. Pending
+// uploads are bounded; refusal retains their on-disk debt for explicit recovery.
+export function createStagingPublisher(deps, { capacity = 64 } = {}) {
+    const pending = [];
+    let running = null, closed = false;
+    const start = () => {
+        running = (async () => {
+            while (pending.length) {
+                const { entry, resolve, reject } = pending.shift();
+                try { resolve(await publishStaging(deps, entry)); }
+                catch (err) { reject(err); }
+            }
+        })().finally(() => {
+            running = null;
+            if (pending.length) start();
+        });
+    };
+    return {
+        submit(entry) {
+            if (closed || pending.length >= capacity) {
+                return Promise.resolve(keep(deps.log, describe(entry), entry.tmpDir,
+                    closed ? 'the publisher is closed' : 'the publication queue is full',
+                    new Error('Upload retained for explicit retry'), entry.token));
+            }
+            return new Promise((resolve, reject) => {
+                pending.push({ entry, resolve, reject });
+                if (!running) start();
+            });
+        },
+        async close() {
+            closed = true;
+            // No new admissions; finish queued/active transactions before the
+            // server destroys their shared read clone and logging context.
+            if (running) await running;
+        },
+    };
+}

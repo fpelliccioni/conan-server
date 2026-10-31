@@ -5,8 +5,8 @@ import path from 'path';
 import {encode, decode, labels} from 'windows-1252';
 import getRawBody from 'raw-body';
 import typeis from 'type-is';
-import { uploadToRepo } from './github.js';
-import { publishStaging } from './publish.js';
+import { uploadToRepo, refreshReadClone } from './github.js';
+import { createStagingPublisher } from './publish.js';
 import { createWriteGuard, credentialFrom } from './credentials.js';
 import { redactSecret, messageOf } from './redact.js';
 import crypto from 'crypto';
@@ -14,7 +14,6 @@ import NodeCache from 'node-cache';
 import memoize from 'memoizee';
 // const memoize = require('memoizee');
 // const git = require('simple-git')();
-import git from 'simple-git';
 import { promises as fsPro } from 'fs';
 import fs from 'fs';
 
@@ -32,10 +31,7 @@ process.on('unhandledRejection', (reason) => {
 async function performGithubPull() {
     console.log(`Github Repo Dir: ${process.env.GIT_REPO_DIR}`);
 
-    const gitRepo = git(process.env.GIT_REPO_DIR);
-    const status = await gitRepo.status();
-    console.log(status);
-    await gitRepo.pull();
+    console.log(await refreshReadClone(process.env.GIT_REPO_DIR));
 }
 
 // -----------------------------------------------------------------------------
@@ -899,23 +895,44 @@ app.use((err, req, res, next) => {
     res.status(500).json({ errors: [{ status: 500, message: 'Internal server error.' }] });
 });
 
-app.listen(app.get('port'),()=>{
+const server = app.listen(app.get('port'),()=>{
     console.log(`Server listening on port ${app.get('port')}`);
 });
 
 const myCache = new NodeCache( { stdTTL: expirationTime, checkperiod: 2 } )
+
+const publisher = createStagingPublisher({
+    uploadToRepo,
+    performGithubPull,
+    removeStaging: cleanUpTmpDir,
+    log: { info: (m) => console.log(m), error: (m) => console.error(m) },
+});
+
+let stopping;
+function shutdown() {
+    if (stopping) return stopping;
+    stopping = (async () => {
+        myCache.close();
+        const requestsClosed = new Promise(resolve => server.close(resolve));
+        server.closeIdleConnections?.();
+        await publisher.close();
+        await requestsClosed;
+    })();
+    stopping.catch(err => {
+        console.error(`[shutdown] ${redactSecret(messageOf(err))}`);
+        process.exitCode = 1;
+    });
+    return stopping;
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 myCache.on("expired", async function(key, value){
     const { token, owner, repo, branch, recipe_name, version, tmpDir, revision } = value;
     try {
         console.log(`[expired] publishing ${recipe_name}/${version}#${revision} to ${owner}/${repo}@${branch} from ${tmpDir}`);
 
-        await publishStaging({
-            uploadToRepo,
-            performGithubPull,
-            removeStaging: cleanUpTmpDir,
-            log: { info: (m) => console.log(m), error: (m) => console.error(m) },
-        }, {
+        await publisher.submit({
             token, owner, repo, branch, recipe_name, version, revision, tmpDir,
             uploadPath: getUploadPath(tmpDir, owner, repo, branch),
             commitMessage: getCommitMessage(recipe_name, version, revision),
