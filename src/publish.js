@@ -109,8 +109,8 @@ export function createStagingPublisher(deps, { capacity = 64 } = {}) {
     const start = () => {
         running = (async () => {
             while (pending.length) {
-                const { entry, resolve, reject } = pending.shift();
-                try { resolve(await publishStaging(deps, entry)); }
+                const { entry, operation, resolve, reject } = pending.shift();
+                try { resolve(await (operation ? operation() : publishStaging(deps, entry))); }
                 catch (err) { reject(err); }
             }
         })().finally(() => {
@@ -127,6 +127,17 @@ export function createStagingPublisher(deps, { capacity = 64 } = {}) {
             }
             return new Promise((resolve, reject) => {
                 pending.push({ entry, resolve, reject });
+                if (!running) start();
+            });
+        },
+        run(operation) {
+            if (closed || pending.length >= capacity) {
+                const error = new Error('Publication queue unavailable');
+                error.status = 503;
+                return Promise.reject(error);
+            }
+            return new Promise((resolve, reject) => {
+                pending.push({ operation, resolve, reject });
                 if (!running) start();
             });
         },

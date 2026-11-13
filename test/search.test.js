@@ -94,4 +94,12 @@ test('Conan binary search exposes published package metadata over HTTP', { timeo
     assert.equal((await fetch(`${filesUrl}/absent.txt`)).status, 404);
     assert.equal((await fetch(`${packageUrl}/absent.txt`)).status, 404);
 
+    const upload = `http://127.0.0.1:${port}/api/v2/conans/sample/1.0/_/_/revisions/rrev/packages/${pid}/revisions/prev/files/conan_package.tgz`;
+    // A release archive above the old 50 MiB ceiling must reach authentication.
+    const normal = await fetch(upload, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.alloc(53_000_000) });
+    assert.equal(normal.status, 401);
+    const oversized = await fetch(upload, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.alloc(101 * 1024 * 1024) });
+    assert.equal(oversized.status, 413);
+    assert.equal((await oversized.json()).errors[0].status, 413);
+
 });

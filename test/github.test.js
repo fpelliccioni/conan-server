@@ -44,6 +44,7 @@ async function fixture(t) {
     const stage = path.join(root, 'stage');
     await mkdir(seed); await mkdir(stage);
     await git(root, 'init', '--bare', remote);
+    await git(root, '--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/master');
     await git(seed, 'init');
     await git(seed, 'symbolic-ref', 'HEAD', 'refs/heads/master');
     await writeFile(path.join(seed, 'keep.txt'), 'unrelated package');
@@ -273,4 +274,28 @@ setInterval(()=>{},1000);
         clearTimeout(rescue); process.env.PATH = previous;
         try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL'); } catch {}
     }
+});
+
+
+test('metadata without the archive cannot publish a package revision', async (t) => {
+    const f = await fixture(t);
+    const relative = 'sample/1.0/rrev/packages/pid/prev';
+    const dir = path.join(f.stage, relative);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'conaninfo.txt'), '[settings]\n');
+    await writeFile(path.join(dir, 'conanmanifest.txt'), '123\nconaninfo.txt: abc\nbin/sample: def\n');
+    await writeFile(path.join(path.dirname(dir), 'latest.json'), '{"revision":"prev"}');
+    const before = await git(f.root, '--git-dir', f.remote, 'rev-parse', 'master');
+    const publish = () => uploadToRepo('not-a-real-token', f.stage, 'k-nuth',
+        'conan-packages', 'master', 'Upload package', { remoteUrl: f.remote });
+    await assert.rejects(publish(), /Incomplete package/);
+    assert.equal(await git(f.root, '--git-dir', f.remote, 'rev-parse', 'master'), before);
+    assert.equal(await readFile(path.join(dir, 'conaninfo.txt'), 'utf8'), '[settings]\n');
+    await writeFile(path.join(dir, 'conan_package.tgz'), 'archive');
+    await publish();
+    assert.equal(await git(f.root, '--git-dir', f.remote, 'show', `master:${relative}/conan_package.tgz`), 'archive');
+    // Conan can publish a package with no payload archive when only conaninfo is listed.
+    await rm(path.join(dir, 'conan_package.tgz'));
+    await writeFile(path.join(dir, 'conanmanifest.txt'), '123\nconaninfo.txt: abc\n');
+    await publish();
 });
