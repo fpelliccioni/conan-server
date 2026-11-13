@@ -5,7 +5,8 @@ import path from 'path';
 import {encode, decode, labels} from 'windows-1252';
 import getRawBody from 'raw-body';
 import typeis from 'type-is';
-import { uploadToRepo, refreshReadClone } from './github.js';
+import { uploadToRepo, refreshReadClone, removeBinaryFromRepo } from './github.js';
+import { registerBinaryRoutes } from './remove.js';
 import { createStagingPublisher } from './publish.js';
 import { createWriteGuard, credentialFrom } from './credentials.js';
 import { redactSecret, messageOf } from './redact.js';
@@ -32,6 +33,9 @@ async function performGithubPull() {
     console.log(`Github Repo Dir: ${process.env.GIT_REPO_DIR}`);
 
     console.log(await refreshReadClone(process.env.GIT_REPO_DIR));
+    getGithubLocalFileContentMemoized.clear();
+    getGithubLocalDirContentMemoized.clear();
+    getGithubLocalDirContentJustDirsMemoized.clear();
 }
 
 // -----------------------------------------------------------------------------
@@ -117,7 +121,7 @@ const appendContentType = (req, res, next) => {
 };
 app.use(appendContentType);
 app.use(morgan('dev'));
-app.use(express.raw({limit: '50mb'}));
+app.use(express.raw({limit: '100mb'}));
 app.use(express.urlencoded({extended:false}));
 app.use(express.json());
 app.use(express.text());
@@ -495,6 +499,16 @@ app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/search', a
     }
 });
 
+registerBinaryRoutes(app, {
+    authorize: requireWriteCredential,
+    run: operation => publisher.run(operation),
+    remove: (token, target) => removeBinaryFromRepo(token, target,
+        process.env.OWNER, process.env.REPO, process.env.BRANCH),
+    refresh: performGithubPull,
+    root: () => process.env.GIT_REPO_DIR,
+    headers: writeCommonHeaders,
+});
+
 app.get('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/latest', async (req, res) => {
     const { recipe_name, version, revision, package_id } = req.params;
     // const { owner, repo, branch } = { owner: process.env.OWNER, repo: process.env.REPO, branch: process.env.BRANCH}
@@ -758,7 +772,7 @@ function getOrSetCacheEntry(owner, repo, branch, recipe_name, version, revision,
     return { key, value };
 }
 
-app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
+app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:file_name', express.raw({type: '*/*', limit: '100mb'}), async (req, res) => {
     if ( ! await requireWriteCredential(req, res)) return;
 
     const auth = req.header('Authorization');
@@ -810,7 +824,7 @@ app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/files/:fil
     justWriteFile(res, fileContent, filePath);
 });
 
-app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', express.raw({type: '*/*'}), async (req, res) => {
+app.put('/api/v2/conans/:recipe_name/:version/_/_/revisions/:revision/packages/:package_id/revisions/:package_revision/files/:file_name', express.raw({type: '*/*', limit: '100mb'}), async (req, res) => {
     if ( ! await requireWriteCredential(req, res)) return;
 
     const auth = req.header('Authorization');
@@ -892,10 +906,12 @@ app.use((err, req, res, next) => {
     console.error(`[error] ${req.method} ${req.path}: ${redactSecret(detail, secret)}`);
 
     if (res.headersSent) return next(err);
-    res.status(500).json({ errors: [{ status: 500, message: 'Internal server error.' }] });
+    const status = err?.type === 'entity.too.large' ? 413 : 500;
+    const message = status === 413 ? 'Upload exceeds the 100 MiB limit.' : 'Internal server error.';
+    res.status(status).json({ errors: [{ status, message }] });
 });
 
-const server = app.listen(app.get('port'),()=>{
+const server = app.listen(app.get('port'), process.env.HOST, ()=>{
     console.log(`Server listening on port ${app.get('port')}`);
 });
 

@@ -50,3 +50,19 @@ test('a failed publication retains its debt and does not block the next upload',
     await publisher.close();
     assert.deepEqual(calls, ['refresh', '/retained/next']);
 });
+
+test('deletion operations share the publication owner and queue admission', async () => {
+    const entered = deferred(), release = deferred(), calls = [];
+    const publisher = createStagingPublisher({
+        async uploadToRepo() { calls.push('upload'); entered.resolve(); await release.promise; },
+        async performGithubPull() { calls.push('refresh upload'); },
+        async removeStaging() {}, log: { info() {}, error() {} },
+    }, { capacity: 1 });
+    const upload = publisher.submit(entry('upload'));
+    await entered.promise;
+    const deletion = publisher.run(async () => { calls.push('delete'); calls.push('refresh delete'); });
+    await assert.rejects(publisher.run(async () => {}), { status: 503 });
+    release.resolve(); await upload; await deletion; await publisher.close();
+    assert.deepEqual(calls, ['upload', 'refresh upload', 'delete', 'refresh delete']);
+    await assert.rejects(publisher.run(async () => {}), { status: 503 });
+});

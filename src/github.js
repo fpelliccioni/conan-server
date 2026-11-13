@@ -1,9 +1,10 @@
 import dotenv from 'dotenv';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readdir, copyFile, chmod, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, copyFile, chmod, writeFile, readFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { redactSecret } from './redact.js';
+import { binaryPath, existingDirectory, packageRevisions, readMetadata } from './remove.js';
 
 dotenv.config();
 
@@ -12,6 +13,14 @@ dotenv.config();
 // A competing publication is never overwritten: a non-fast-forward push fails
 // and publishStaging retains the upload for an explicit retry.
 export async function uploadToRepo(token, uploadPath, owner, repo, branch, message, options = {}) {
+    return updateRepository(token, owner, repo, branch, message, await uploadPrefixes(uploadPath),
+        async (checkout) => {
+            await copyUpload(uploadPath, checkout);
+            await validatePackages(uploadPath, checkout);
+        }, options);
+}
+
+async function updateRepository(token, owner, repo, branch, message, prefixes, mutate, options = {}) {
     if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) {
         throw new Error('Invalid GitHub repository');
     }
@@ -43,10 +52,10 @@ export async function uploadToRepo(token, uploadPath, owner, repo, branch, messa
         }
         // Do not materialize every other package just to publish one version.
         await git('sparse-checkout', 'init', '--cone');
-        await git('sparse-checkout', 'set', '--', ...await uploadPrefixes(uploadPath));
+        await git('sparse-checkout', 'set', '--', ...prefixes);
         await git('-c', 'credential.helper=', 'fetch', '--depth=1', 'origin', `refs/heads/${branch}`);
         await git('checkout', '--detach', 'FETCH_HEAD');
-        await copyUpload(uploadPath, checkout);
+        await mutate(checkout, git);
         await git('add', '--all', '--force', '--', '.');
         try {
             await git('diff', '--cached', '--quiet');
@@ -59,7 +68,8 @@ export async function uploadToRepo(token, uploadPath, owner, repo, branch, messa
         await git('-c', 'credential.helper=', 'push', 'origin', `HEAD:refs/heads/${branch}`);
     } catch (err) {
         // Expose only a redacted diagnostic; credentials stay in the child environment.
-        throw new Error(redactSecret(err.message, token));
+        throw Object.assign(new Error(redactSecret(err.message, token)),
+            [400, 404].includes(err.status) ? { status: err.status } : {});
     } finally {
         await rm(work, { recursive: true, force: true });
     }
@@ -170,4 +180,56 @@ export async function refreshReadClone(directory, options = {}) {
     const status = await executeGit(['status', '--porcelain'], settings);
     if (status.trim()) throw new Error('Read clone has local changes; refusing to update it');
     return executeGit(['pull', '--ff-only'], settings);
+}
+
+
+// Validate touched revisions against the merged checkout so a retry containing
+// only the missing archive can complete metadata already present upstream.
+// Reject before committing/pushing; publishStaging retains the original bytes.
+async function validatePackages(source, checkout, parts = []) {
+    if (parts.length === 6 && parts[3] === 'packages') {
+        const directory = path.join(checkout, ...parts);
+        try {
+            for (const name of ['conaninfo.txt', 'conanmanifest.txt']) {
+                if (!(await stat(path.join(directory, name))).isFile()) throw new Error(`Missing ${name}`);
+            }
+            const manifest = await readFile(path.join(directory, 'conanmanifest.txt'), 'utf8');
+            const entries = manifest.trim().split(/\r?\n/).slice(1).filter(Boolean);
+            if (entries.some(line => !line.startsWith('conaninfo.txt: '))) {
+                if (!(await stat(path.join(directory, 'conan_package.tgz'))).isFile()) {
+                    throw new Error('Missing conan_package.tgz');
+                }
+            }
+        } catch (err) {
+            throw new Error(`Incomplete package ${parts.join('/')}: ${err.message}`);
+        }
+        return;
+    }
+    if (parts.length >= 6) return;
+    for (const entry of await readdir(path.join(source, ...parts), { withFileTypes: true })) {
+        if (entry.isDirectory()) await validatePackages(source, checkout, [...parts, entry.name]);
+    }
+}
+
+
+export async function removeBinaryFromRepo(token, target, owner, repo, branch, options = {}) {
+    const relative = binaryPath(target);
+    const parent = target.package_revision ? path.posix.dirname(relative) : relative;
+    return updateRepository(token, owner, repo, branch,
+        `Remove Conan binaries ${relative}`, [parent], async (checkout, git) => {
+            await existingDirectory(checkout, relative);
+            await git('rm', '-r', '--', relative);
+            if (!target.package_revision) return;
+            const directory = path.join(checkout, parent);
+            const remaining = await packageRevisions(directory);
+            if (!remaining.length) {
+                await git('rm', '-r', '--ignore-unmatch', '--', parent);
+            } else {
+                const latestPath = path.join(directory, 'latest.json');
+                let latest;
+                try { latest = JSON.parse(await readMetadata(latestPath)); } catch (error) { if (error.status) throw error; }
+                if (!remaining.some(item => item.revision === latest?.revision))
+                    await writeFile(latestPath, JSON.stringify(remaining[0]));
+            }
+        }, options);
 }
